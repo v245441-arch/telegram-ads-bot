@@ -34,7 +34,7 @@ CATEGORIES = [
 DB_PATH = "ads.db"
 
 def init_db():
-    """Создаёт таблицу объявлений с полем category."""
+    """Создаёт таблицу объявлений."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -60,9 +60,10 @@ def add_ad_to_db(title, description, price, category, photo_id, user_id, usernam
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (title, description, price, category, photo_id, user_id, username))
         conn.commit()
+        return cursor.lastrowid  # возвращаем ID добавленной записи
 
 def get_all_ads():
-    """Возвращает список всех объявлений."""
+    """Возвращает список всех объявлений (без ID, но с категорией)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads ORDER BY id DESC")
@@ -80,7 +81,7 @@ def get_all_ads():
         return ads
 
 def get_ads_by_category(category):
-    """Возвращает объявления только указанной категории."""
+    """Возвращает объявления указанной категории."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
@@ -97,6 +98,32 @@ def get_ads_by_category(category):
             })
         return ads
 
+def get_ads_by_user(user_id):
+    """Возвращает объявления конкретного пользователя (включая ID для удаления)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, description, price, category, photo_id FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        rows = cursor.fetchall()
+        ads = []
+        for row in rows:
+            ads.append({
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'photo': row[5]
+            })
+        return ads
+
+def delete_ad_by_id(ad_id):
+    """Удаляет объявление по его ID."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM ads WHERE id = ?", (ad_id,))
+        conn.commit()
+        return cursor.rowcount > 0  # вернёт True, если удалена хотя бы одна запись
+
 # Инициализируем БД при запуске
 init_db()
 
@@ -105,7 +132,7 @@ class AddAd(StatesGroup):
     title = State()
     description = State()
     price = State()
-    category = State()   # новое состояние для выбора категории
+    category = State()
     photo = State()
 
 # --- Команда /start ---
@@ -115,7 +142,8 @@ async def cmd_start(message: types.Message):
         "👋 Привет! Я бот-доска объявлений.\n"
         "/add — добавить объявление\n"
         "/list — показать все объявления\n"
-        "/categories — показать объявления по категориям"
+        "/categories — показать объявления по категориям\n"
+        "/myads — мои объявления"
     )
 
 # --- Команда /add ---
@@ -142,32 +170,27 @@ async def add_price(message: types.Message, state: FSMContext):
         await message.answer("Пожалуйста, введите цену числом.")
         return
     await state.update_data(price=int(message.text))
-
-    # Показываем inline-кнопки с категориями
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
         builder.button(text=cat, callback_data=f"cat_{cat}")
-    builder.adjust(1)  # по одной кнопке в ряд
+    builder.adjust(1)
     await message.answer("Выберите категорию:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.category)
 
-# --- Обработчик выбора категории (callback) ---
 @dp.callback_query(AddAd.category)
 async def choose_category(callback: types.CallbackQuery, state: FSMContext):
-    # Из callback_data получаем название категории (оно после "cat_")
     category = callback.data.replace("cat_", "")
     await state.update_data(category=category)
-    await callback.message.edit_reply_markup(reply_markup=None)  # убираем кнопки
+    await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("Отправьте фото товара (или /skip):")
     await state.set_state(AddAd.photo)
     await callback.answer()
 
-# --- Обработчик фото ---
 @dp.message(AddAd.photo)
 async def add_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     photo_id = message.photo[-1].file_id if message.photo else None
-    add_ad_to_db(
+    ad_id = add_ad_to_db(
         title=data['title'],
         description=data['description'],
         price=data['price'],
@@ -176,13 +199,13 @@ async def add_photo(message: types.Message, state: FSMContext):
         user_id=message.from_user.id,
         username=message.from_user.username or "NoUsername"
     )
-    await message.answer("✅ Объявление добавлено!")
+    await message.answer("✅ Объявление добавлено! (ID: {})".format(ad_id))
     await state.clear()
 
 @dp.message(AddAd.photo, Command('skip'))
 async def skip_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    add_ad_to_db(
+    ad_id = add_ad_to_db(
         title=data['title'],
         description=data['description'],
         price=data['price'],
@@ -191,7 +214,7 @@ async def skip_photo(message: types.Message, state: FSMContext):
         user_id=message.from_user.id,
         username=message.from_user.username or "NoUsername"
     )
-    await message.answer("✅ Объявление добавлено без фото.")
+    await message.answer("✅ Объявление добавлено без фото! (ID: {})".format(ad_id))
     await state.clear()
 
 # --- Команда /list (все объявления) ---
@@ -217,7 +240,6 @@ async def cmd_categories(message: types.Message):
     builder.adjust(1)
     await message.answer("Выберите категорию для просмотра:", reply_markup=builder.as_markup())
 
-# --- Обработчик показа объявлений по категории ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category(callback: types.CallbackQuery):
     category = callback.data.replace("show_", "")
@@ -232,6 +254,60 @@ async def show_category(callback: types.CallbackQuery):
             await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
         else:
             await callback.message.answer(text, parse_mode='HTML')
+    await callback.answer()
+
+# --- Команда /myads (личный кабинет) ---
+@dp.message(Command('myads'))
+async def cmd_myads(message: types.Message):
+    user_ads = get_ads_by_user(message.from_user.id)
+    if not user_ads:
+        await message.answer("📭 У вас пока нет объявлений.")
+        return
+
+    for ad in user_ads:
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
+        # Кнопка удаления
+        delete_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{ad['id']}")]
+            ]
+        )
+        if ad['photo']:
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=delete_kb)
+        else:
+            await message.answer(text, parse_mode='HTML', reply_markup=delete_kb)
+
+# --- Обработчик удаления ---
+@dp.callback_query(lambda c: c.data and c.data.startswith("del_"))
+async def process_delete(callback: types.CallbackQuery):
+    ad_id = int(callback.data.replace("del_", ""))
+
+    # Подтверждение удаления
+    confirm_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_del_{ad_id}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_del")
+            ]
+        ]
+    )
+    await callback.message.edit_reply_markup(reply_markup=None)  # убираем старую клавиатуру
+    await callback.message.answer("Вы уверены, что хотите удалить это объявление?", reply_markup=confirm_kb)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("confirm_del_"))
+async def confirm_delete(callback: types.CallbackQuery):
+    ad_id = int(callback.data.replace("confirm_del_", ""))
+    success = delete_ad_by_id(ad_id)
+    if success:
+        await callback.message.edit_text("✅ Объявление удалено.")
+    else:
+        await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "cancel_del")
+async def cancel_delete(callback: types.CallbackQuery):
+    await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
 # --- Запуск бота ---
