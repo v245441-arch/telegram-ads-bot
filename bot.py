@@ -114,7 +114,6 @@ async def add_price(message: types.Message, state: FSMContext):
 async def add_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     photo_id = message.photo[-1].file_id if message.photo else None
-    # Сохраняем в базу
     add_ad_to_db(
         title=data['title'],
         description=data['description'],
