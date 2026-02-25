@@ -50,7 +50,7 @@ CATEGORIES = [
 DB_PATH = "ads.db"
 
 def init_db():
-    """Создаёт таблицу объявлений, если её нет."""
+    """Создаёт таблицу объявлений и избранного, если их нет."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -63,6 +63,16 @@ def init_db():
                 photo_id TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ad_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (ad_id) REFERENCES ads(id) ON DELETE CASCADE,
+                UNIQUE(user_id, ad_id)
             )
         """)
         conn.commit()
@@ -82,17 +92,18 @@ def get_all_ads():
     """Возвращает список всех объявлений."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads ORDER BY id DESC")
+        cursor.execute("SELECT id, title, description, price, category, photo_id, username FROM ads ORDER BY id DESC")
         rows = cursor.fetchall()
         ads = []
         for row in rows:
             ads.append({
-                'title': row[0],
-                'description': row[1],
-                'price': row[2],
-                'category': row[3],
-                'photo': row[4],
-                'username': row[5]
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'photo': row[5],
+                'username': row[6]
             })
         return ads
 
@@ -100,17 +111,18 @@ def get_ads_by_category(category):
     """Возвращает объявления указанной категории."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
+        cursor.execute("SELECT id, title, description, price, category, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
             ads.append({
-                'title': row[0],
-                'description': row[1],
-                'price': row[2],
-                'category': row[3],
-                'photo': row[4],
-                'username': row[5]
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'photo': row[5],
+                'username': row[6]
             })
         return ads
 
@@ -120,7 +132,7 @@ def search_ads(keyword):
         cursor = conn.cursor()
         pattern = f"%{keyword}%"
         cursor.execute("""
-            SELECT title, description, price, category, photo_id, username 
+            SELECT id, title, description, price, category, photo_id, username 
             FROM ads 
             WHERE title LIKE ? OR description LIKE ? 
             ORDER BY id DESC
@@ -129,12 +141,13 @@ def search_ads(keyword):
         ads = []
         for row in rows:
             ads.append({
-                'title': row[0],
-                'description': row[1],
-                'price': row[2],
-                'category': row[3],
-                'photo': row[4],
-                'username': row[5]
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'photo': row[5],
+                'username': row[6]
             })
         return ads
 
@@ -197,6 +210,59 @@ def delete_ad_by_id(ad_id):
         conn.commit()
         return cursor.rowcount > 0
 
+# --- Функции для работы с избранным ---
+def add_favorite(user_id, ad_id):
+    """Добавляет объявление в избранное пользователя."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO favorites (user_id, ad_id) VALUES (?, ?)", (user_id, ad_id))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Уже в избранном
+            return False
+
+def remove_favorite(user_id, ad_id):
+    """Удаляет объявление из избранного пользователя."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM favorites WHERE user_id = ? AND ad_id = ?", (user_id, ad_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def get_user_favorites(user_id):
+    """Возвращает список избранных объявлений пользователя."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT a.id, a.title, a.description, a.price, a.category, a.photo_id, a.username
+            FROM ads a
+            JOIN favorites f ON a.id = f.ad_id
+            WHERE f.user_id = ?
+            ORDER BY f.created_at DESC
+        """, (user_id,))
+        rows = cursor.fetchall()
+        ads = []
+        for row in rows:
+            ads.append({
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'photo': row[5],
+                'username': row[6]
+            })
+        return ads
+
+def is_favorite(user_id, ad_id):
+    """Проверяет, находится ли объявление в избранном у пользователя."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM favorites WHERE user_id = ? AND ad_id = ?", (user_id, ad_id))
+        return cursor.fetchone() is not None
+
 # --- Статистика для админа ---
 def get_stats():
     """Возвращает словарь со статистикой."""
@@ -256,7 +322,8 @@ def get_main_keyboard():
             [KeyboardButton(text="📋 Список объявлений")],
             [KeyboardButton(text="➕ Добавить объявление")],
             [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
-            [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="📊 Статистика")]
+            [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
+            [KeyboardButton(text="📊 Статистика")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -271,6 +338,15 @@ def get_search_keyboard():
         one_time_keyboard=False
     )
     return keyboard
+
+def get_favorite_keyboard(user_id, ad_id):
+    """Создаёт inline-клавиатуру с кнопкой избранного."""
+    is_fav = is_favorite(user_id, ad_id)
+    if is_fav:
+        button = InlineKeyboardButton(text="✅ В избранном", callback_data=f"fav_remove_{ad_id}")
+    else:
+        button = InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav_add_{ad_id}")
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
 # --- Состояния FSM для добавления ---
 class AddAd(StatesGroup):
@@ -356,10 +432,11 @@ async def handle_list_button(message: types.Message, state: FSMContext):
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
-            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
-            await message.answer(text, parse_mode='HTML')
+            await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard())
 
 @dp.message(lambda message: message.text == "➕ Добавить объявление")
@@ -414,6 +491,25 @@ async def handle_search_button(message: types.Message, state: FSMContext):
         reply_markup=get_search_keyboard()
     )
 
+@dp.message(lambda message: message.text == "⭐ Избранное")
+async def handle_favorites_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    favorites = get_user_favorites(message.from_user.id)
+    if not favorites:
+        await message.answer("⭐ У вас пока нет избранных объявлений.", reply_markup=get_main_keyboard())
+        return
+    await message.answer("⭐ Ваши избранные объявления:")
+    for ad in favorites:
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"fav_remove_{ad['id']}")]]
+        )
+        if ad['photo']:
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
+
 @dp.message(lambda message: message.text == "📊 Статистика")
 async def handle_stats_button(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -462,10 +558,11 @@ async def process_search_query(message: types.Message, state: FSMContext):
         await message.answer(f"🔍 Результаты поиска по запросу «{query}»:")
         for ad in ads:
             text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+            keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
             if ad['photo']:
-                await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+                await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
             else:
-                await message.answer(text, parse_mode='HTML')
+                await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
         await message.answer("Продолжайте поиск или нажмите '❌ Отмена' для выхода.")
     # Состояние не очищаем, остаёмся в режиме поиска
 
@@ -561,10 +658,11 @@ async def cmd_list(message: types.Message, state: FSMContext):
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
-            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
-            await message.answer(text, parse_mode='HTML')
+            await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard())
 
 # --- Команда /categories ---
@@ -587,10 +685,11 @@ async def show_category(callback: types.CallbackQuery):
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b>\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
         if ad['photo']:
-            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
-            await callback.message.answer(text, parse_mode='HTML')
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await callback.answer()
 
 # --- Команда /myads (личный кабинет) ---
@@ -791,6 +890,72 @@ async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
 async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ Удаление отменено.", reply_markup=get_main_keyboard())
     await callback.answer()
+
+# --- Команда /favorites ---
+@dp.message(Command('favorites'))
+async def cmd_favorites(message: types.Message, state: FSMContext):
+    await state.clear()
+    favorites = get_user_favorites(message.from_user.id)
+    if not favorites:
+        await message.answer("⭐ У вас пока нет избранных объявлений.", reply_markup=get_main_keyboard())
+        return
+    await message.answer("⭐ Ваши избранные объявления:")
+    for ad in favorites:
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"fav_remove_{ad['id']}")]]
+        )
+        if ad['photo']:
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
+
+# --- Обработчики избранного ---
+@dp.callback_query(lambda c: c.data and c.data.startswith("fav_add_"))
+async def add_to_favorites(callback: types.CallbackQuery):
+    ad_id = int(callback.data.replace("fav_add_", ""))
+    user_id = callback.from_user.id
+    
+    success = add_favorite(user_id, ad_id)
+    if success:
+        # Обновляем клавиатуру
+        new_keyboard = get_favorite_keyboard(user_id, ad_id)
+        try:
+            if callback.message.photo:
+                await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+            else:
+                await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+            await callback.answer("✅ Добавлено в избранное!")
+        except Exception as e:
+            await callback.answer("✅ Добавлено в избранное!")
+    else:
+        await callback.answer("⚠️ Уже в избранном")
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("fav_remove_"))
+async def remove_from_favorites(callback: types.CallbackQuery):
+    ad_id = int(callback.data.replace("fav_remove_", ""))
+    user_id = callback.from_user.id
+    
+    success = remove_favorite(user_id, ad_id)
+    if success:
+        # Если это сообщение из раздела избранного, удаляем его
+        if "❌ Удалить из избранного" in callback.message.reply_markup.inline_keyboard[0][0].text:
+            await callback.message.delete()
+            await callback.answer("❌ Удалено из избранного")
+        else:
+            # Иначе обновляем клавиатуру
+            new_keyboard = get_favorite_keyboard(user_id, ad_id)
+            try:
+                if callback.message.photo:
+                    await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+                else:
+                    await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+                await callback.answer("❌ Удалено из избранного")
+            except Exception as e:
+                await callback.answer("❌ Удалено из избранного")
+    else:
+        await callback.answer("⚠️ Не было в избранном")
 
 # --- Запуск бота ---
 async def main():
