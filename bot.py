@@ -7,17 +7,22 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Токен берем из переменной окружения (на Railway зададим отдельно)
-API_TOKEN = os.getenv('BOT_TOKEN', 'ТВОЙ_ТОКЕН_ЗДЕСЬ')  # второй вариант для локального теста
+# Токен из переменной окружения (обязательно!)
+API_TOKEN = os.getenv('BOT_TOKEN')
+if not API_TOKEN:
+    raise ValueError("Переменная окружения BOT_TOKEN не задана!")
 
 # Настройки вебхука
 WEBHOOK_PATH = '/webhook'
 WEBHOOK_SECRET = 'my-secret-key'  # можно придумать любую строку
-BASE_WEBHOOK_URL = os.getenv('BASE_WEBHOOK_URL', '')  # будет задан на Railway
+BASE_WEBHOOK_URL = os.getenv('BASE_WEBHOOK_URL')
+if not BASE_WEBHOOK_URL:
+    raise ValueError("Переменная окружения BASE_WEBHOOK_URL не задана!")
 
 # Создаем объекты бота и диспетчера
 bot = Bot(token=API_TOKEN)
@@ -119,22 +124,20 @@ async def cmd_list(message: types.Message):
 
 # Функция, которая выполнится при запуске бота (установка вебхука)
 async def on_startup(bot: Bot, base_url: str):
-    await bot.set_webhook(f"{base_url}{WEBHOOK_PATH}", secret_token=WEBHOOK_SECRET)
-    logging.info(f"Webhook set to {base_url}{WEBHOOK_PATH}")
+    webhook_url = f"{base_url}{WEBHOOK_PATH}"
+    await bot.set_webhook(webhook_url, secret_token=WEBHOOK_SECRET)
+    logging.info(f"Webhook установлен: {webhook_url}")
 
 # Функция, которая выполнится при остановке (удаление вебхука)
 async def on_shutdown(bot: Bot):
     await bot.delete_webhook()
-    logging.info("Webhook deleted")
+    logging.info("Webhook удалён")
 
 # Главная функция запуска
 async def main():
     # Настраиваем aiohttp приложение
     app = web.Application()
-    
-    # Создаем обработчик вебхука для aiogram
-    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-    
+
     # Регистрируем обработчик вебхука
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
@@ -142,25 +145,26 @@ async def main():
         secret_token=WEBHOOK_SECRET
     )
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
-    
+
     # Регистрируем функции запуска/остановки
     app.on_startup.append(lambda _: asyncio.create_task(on_startup(bot, BASE_WEBHOOK_URL)))
     app.on_shutdown.append(lambda _: asyncio.create_task(on_shutdown(bot)))
-    
+
     # Подключаем диспетчер к приложению
     setup_application(app, dp, bot=bot)
-    
+
     # Получаем порт из окружения (Railway задает PORT автоматически)
     port = int(os.getenv('PORT', '8080'))
-    
+
     # Запускаем веб-сервер
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host='0.0.0.0', port=port)
     await site.start()
-    
-    logging.info(f"Bot started on port {port}")
-    
+
+    logging.info(f"Бот запущен на порту {port}")
+    logging.info(f"Эндпоинт вебхука: {BASE_WEBHOOK_URL}{WEBHOOK_PATH}")
+
     # Держим приложение запущенным
     await asyncio.Event().wait()
 
