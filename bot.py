@@ -52,15 +52,15 @@ def init_db():
         conn.commit()
 
 def add_ad_to_db(title, description, price, category, photo_id, user_id, username):
-    """Добавляет новое объявление в базу."""
+    """Добавляет новое объявление в базу (по умолчанию approved = 0)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO ads (title, description, price, category, photo_id, user_id, username)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO ads (title, description, price, category, photo_id, user_id, username, approved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
         """, (title, description, price, category, photo_id, user_id, username))
         conn.commit()
-        return cursor.lastrowid  # возвращаем ID добавленной записи
+        return cursor.lastrowid
 
 def get_all_ads():
     """Возвращает список всех объявлений (без ID, но с категорией)."""
