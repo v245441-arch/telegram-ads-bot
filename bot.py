@@ -246,7 +246,6 @@ async def moderate_with_deepseek(text: str) -> bool:
         return first_word == "ok"
     except Exception as e:
         logging.error(f"Ошибка DeepSeek API: {e}")
-        # При ошибке не публикуем объявление, чтобы не рисковать
         return False
 
 # --- Состояния FSM для добавления ---
@@ -266,26 +265,32 @@ class EditAd(StatesGroup):
     editing_category = State()
     editing_photo = State()
 
+# --- Состояние для поиска ---
+class SearchState(StatesGroup):
+    waiting_for_query = State()  # состояние, когда ждём поисковый запрос
+
 # --- Команда /start ---
 @dp.message(Command('start'))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()  # сбрасываем любые состояния
     await message.answer(
         "👋 Привет! Я бот-доска объявлений.\n"
         "/add — добавить объявление\n"
         "/list — показать все объявления\n"
         "/categories — показать объявления по категориям\n"
         "/myads — мои объявления\n"
-        "/search <текст> — поиск по объявлениям"
+        "/search — войти в режим поиска (вводите запросы, /exit для выхода)"
     )
     if message.from_user.id == ADMIN_ID:
         await message.answer("🔧 Вы администратор. Доступна команда /stats")
 
 # --- Команда /stats (только для админа) ---
 @dp.message(Command('stats'))
-async def cmd_stats(message: types.Message):
+async def cmd_stats(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Эта команда только для администратора.")
         return
+    await state.clear()
     stats = get_stats()
     text = f"📊 <b>Статистика бота</b>\n\n"
     text += f"📝 Всего объявлений: {stats['total_ads']}\n"
@@ -298,9 +303,53 @@ async def cmd_stats(message: types.Message):
         text += f"  • {title} — {price} руб. (от @{username})\n"
     await message.answer(text, parse_mode='HTML')
 
+# --- Команда /search ---
+@dp.message(Command('search'))
+async def cmd_search(message: types.Message, state: FSMContext):
+    await state.clear()  # сбрасываем предыдущее состояние
+    await state.set_state(SearchState.waiting_for_query)
+    await message.answer(
+        "🔍 Режим поиска активирован.\n"
+        "Теперь отправляйте любые слова или фразы, и я покажу результаты.\n"
+        "Чтобы выйти из режима поиска, отправьте /exit"
+    )
+
+# --- Команда /exit (выход из режима поиска) ---
+@dp.message(Command('exit'))
+async def cmd_exit(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == SearchState.waiting_for_query:
+        await state.clear()
+        await message.answer("🚪 Вы вышли из режима поиска. Чтобы войти снова, используйте /search")
+    else:
+        await message.answer("❓ Вы не в режиме поиска.")
+
+# --- Обработчик текстовых сообщений в состоянии поиска ---
+@dp.message(SearchState.waiting_for_query)
+async def process_search_query(message: types.Message, state: FSMContext):
+    # Получаем текст сообщения (может быть длинным, с переводами строк)
+    query = message.text.strip()
+    if not query:
+        await message.answer("❌ Пустой запрос. Введите что-нибудь.")
+        return
+    # Выполняем поиск
+    ads = search_ads(query)
+    if not ads:
+        await message.answer(f"📭 По запросу «{query}» ничего не найдено.")
+    else:
+        await message.answer(f"🔍 Результаты поиска по запросу «{query}»:")
+        for ad in ads:
+            text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+            if ad['photo']:
+                await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+            else:
+                await message.answer(text, parse_mode='HTML')
+    # Состояние не очищаем — остаёмся в режиме поиска
+
 # --- Добавление объявления с AI-модерацией ---
 @dp.message(Command('add'))
 async def cmd_add(message: types.Message, state: FSMContext):
+    await state.clear()  # выходим из любых состояний (в т.ч. поиска)
     await message.answer("Введите название товара:")
     await state.set_state(AddAd.title)
 
@@ -381,7 +430,8 @@ async def skip_photo(message: types.Message, state: FSMContext):
 
 # --- Команда /list (все объявления) ---
 @dp.message(Command('list'))
-async def cmd_list(message: types.Message):
+async def cmd_list(message: types.Message, state: FSMContext):
+    await state.clear()
     ads = get_all_ads()
     if not ads:
         await message.answer("📭 Пока нет объявлений.")
@@ -395,7 +445,8 @@ async def cmd_list(message: types.Message):
 
 # --- Команда /categories ---
 @dp.message(Command('categories'))
-async def cmd_categories(message: types.Message):
+async def cmd_categories(message: types.Message, state: FSMContext):
+    await state.clear()
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
         builder.button(text=cat, callback_data=f"show_{cat}")
@@ -418,33 +469,10 @@ async def show_category(callback: types.CallbackQuery):
             await callback.message.answer(text, parse_mode='HTML')
     await callback.answer()
 
-# --- Команда /search ---
-@dp.message(Command('search'))
-async def cmd_search(message: types.Message):
-    # Получаем текст после команды
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("🔍 Введите текст для поиска после команды, например: /search диван")
-        return
-    keyword = args[1].strip()
-    if not keyword:
-        await message.answer("❌ Пустой запрос. Введите что-нибудь.")
-        return
-    ads = search_ads(keyword)
-    if not ads:
-        await message.answer(f"📭 По запросу «{keyword}» ничего не найдено.")
-        return
-    await message.answer(f"🔍 Результаты поиска по запросу «{keyword}»:")
-    for ad in ads:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-        if ad['photo']:
-            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
-        else:
-            await message.answer(text, parse_mode='HTML')
-
 # --- Команда /myads (личный кабинет) ---
 @dp.message(Command('myads'))
-async def cmd_myads(message: types.Message):
+async def cmd_myads(message: types.Message, state: FSMContext):
+    await state.clear()
     user_ads = get_user_ads(message.from_user.id)
     if not user_ads:
         await message.answer("📭 У вас пока нет объявлений.")
@@ -475,6 +503,7 @@ async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     if ad_data['user_id'] != callback.from_user.id:
         await callback.answer("❌ Это не ваше объявление.")
         return
+    await state.clear()  # выходим из любых режимов
     await state.update_data(edit_ad_id=ad_id, edit_ad_data=ad_data)
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Название", callback_data="edit_title")
@@ -609,7 +638,7 @@ async def edit_photo_skip(message: types.Message, state: FSMContext):
 
 # --- Удаление ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("del_"))
-async def process_delete(callback: types.CallbackQuery):
+async def process_delete(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("del_", ""))
     confirm_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -624,7 +653,7 @@ async def process_delete(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("confirm_del_"))
-async def confirm_delete(callback: types.CallbackQuery):
+async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("confirm_del_", ""))
     success = delete_ad_by_id(ad_id)
     if success:
@@ -634,7 +663,7 @@ async def confirm_delete(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "cancel_del")
-async def cancel_delete(callback: types.CallbackQuery):
+async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
