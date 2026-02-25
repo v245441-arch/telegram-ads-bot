@@ -26,7 +26,7 @@ if not DEEPSEEK_API_KEY:
 
 # Настройка клиента DeepSeek (совместим с OpenAI)
 openai.api_key = DEEPSEEK_API_KEY
-openai.base_url = "https://api.deepseek.com/v1"
+openai.base_url = "https://api.deepseek.com/v1/"
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
