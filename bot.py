@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
 
@@ -248,6 +248,30 @@ async def moderate_with_deepseek(text: str) -> bool:
         logging.error(f"Ошибка DeepSeek API: {e}")
         return False
 
+# --- Клавиатуры ---
+def get_main_keyboard():
+    """Главное меню с кнопками команд."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📋 Список объявлений")],
+            [KeyboardButton(text="➕ Добавить объявление")],
+            [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
+            [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="📊 Статистика")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
+def get_search_keyboard():
+    """Клавиатура для режима поиска с кнопкой отмены."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    return keyboard
+
 # --- Состояния FSM для добавления ---
 class AddAd(StatesGroup):
     title = State()
@@ -267,28 +291,25 @@ class EditAd(StatesGroup):
 
 # --- Состояние для поиска ---
 class SearchState(StatesGroup):
-    waiting_for_query = State()  # состояние, когда ждём поисковый запрос
+    waiting_for_query = State()
 
 # --- Команда /start ---
 @dp.message(Command('start'))
 async def cmd_start(message: types.Message, state: FSMContext):
-    await state.clear()  # сбрасываем любые состояния
+    await state.clear()
     await message.answer(
-        "👋 Привет! Я бот-доска объявлений.\n"
-        "/add — добавить объявление\n"
-        "/list — показать все объявления\n"
-        "/categories — показать объявления по категориям\n"
-        "/myads — мои объявления\n"
-        "/search — войти в режим поиска (вводите запросы, /exit для выхода)"
+        "👋 Добро пожаловать в доску объявлений!\n"
+        "Используйте кнопки ниже для навигации.",
+        reply_markup=get_main_keyboard()
     )
     if message.from_user.id == ADMIN_ID:
-        await message.answer("🔧 Вы администратор. Доступна команда /stats")
+        await message.answer("🔧 Вы администратор. Статистика доступна.")
 
 # --- Команда /stats (только для админа) ---
 @dp.message(Command('stats'))
 async def cmd_stats(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Эта команда только для администратора.")
+        await message.answer("⛔ Эта команда только для администратора.", reply_markup=get_main_keyboard())
         return
     await state.clear()
     stats = get_stats()
@@ -301,17 +322,18 @@ async def cmd_stats(message: types.Message, state: FSMContext):
     text += "\n<b>Последние 5 объявлений:</b>\n"
     for ad_id, title, price, username in stats['last_ads']:
         text += f"  • {title} — {price} руб. (от @{username})\n"
-    await message.answer(text, parse_mode='HTML')
+    await message.answer(text, parse_mode='HTML', reply_markup=get_main_keyboard())
 
 # --- Команда /search ---
 @dp.message(Command('search'))
 async def cmd_search(message: types.Message, state: FSMContext):
-    await state.clear()  # сбрасываем предыдущее состояние
+    await state.clear()
     await state.set_state(SearchState.waiting_for_query)
     await message.answer(
         "🔍 Режим поиска активирован.\n"
-        "Теперь отправляйте любые слова или фразы, и я покажу результаты.\n"
-        "Чтобы выйти из режима поиска, отправьте /exit"
+        "Введите слово или фразу для поиска.\n"
+        "Чтобы выйти, используйте кнопку 'Отмена' или отправьте /exit",
+        reply_markup=get_search_keyboard()
     )
 
 # --- Команда /exit (выход из режима поиска) ---
@@ -320,19 +342,119 @@ async def cmd_exit(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state == SearchState.waiting_for_query:
         await state.clear()
-        await message.answer("🚪 Вы вышли из режима поиска. Чтобы войти снова, используйте /search")
+        await message.answer("🚪 Вы вышли из режима поиска.", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❓ Вы не в режиме поиска.")
+        await message.answer("❓ Вы не в режиме поиска.", reply_markup=get_main_keyboard())
 
-# --- Обработчик текстовых сообщений в состоянии поиска ---
+# --- Обработчики кнопок главного меню ---
+@dp.message(lambda message: message.text == "📋 Список объявлений")
+async def handle_list_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    ads = get_all_ads()
+    if not ads:
+        await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
+        return
+    for ad in ads:
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad['photo']:
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
+        else:
+            await message.answer(text, parse_mode='HTML')
+    await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "➕ Добавить объявление")
+async def handle_add_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Введите название товара:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AddAd.title)
+
+@dp.message(lambda message: message.text == "📁 Категории")
+async def handle_categories_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    for cat in CATEGORIES:
+        builder.button(text=cat, callback_data=f"show_{cat}")
+    builder.adjust(1)
+    await message.answer(
+        "Выберите категорию для просмотра:",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.message(lambda message: message.text == "👤 Мои объявления")
+async def handle_myads_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    user_ads = get_user_ads(message.from_user.id)
+    if not user_ads:
+        await message.answer("📭 У вас пока нет объявлений.", reply_markup=get_main_keyboard())
+        return
+    for ad in user_ads:
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{ad['id']}"),
+                    InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{ad['id']}")
+                ]
+            ]
+        )
+        if ad['photo']:
+            await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=kb)
+        else:
+            await message.answer(text, parse_mode='HTML', reply_markup=kb)
+    await message.answer("Вот ваши объявления", reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "🔍 Поиск")
+async def handle_search_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(SearchState.waiting_for_query)
+    await message.answer(
+        "🔍 Режим поиска активирован.\n"
+        "Введите слово или фразу для поиска.\n"
+        "Чтобы выйти, используйте кнопку 'Отмена' или отправьте /exit",
+        reply_markup=get_search_keyboard()
+    )
+
+@dp.message(lambda message: message.text == "📊 Статистика")
+async def handle_stats_button(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Эта кнопка только для администратора.", reply_markup=get_main_keyboard())
+        return
+    await state.clear()
+    stats = get_stats()
+    text = f"📊 <b>Статистика бота</b>\n\n"
+    text += f"📝 Всего объявлений: {stats['total_ads']}\n"
+    text += f"👥 Уникальных пользователей: {stats['total_users']}\n\n"
+    text += "<b>По категориям:</b>\n"
+    for cat, count in stats['category_stats']:
+        text += f"  {cat}: {count}\n"
+    text += "\n<b>Последние 5 объявлений:</b>\n"
+    for ad_id, title, price, username in stats['last_ads']:
+        text += f"  • {title} — {price} руб. (от @{username})\n"
+    await message.answer(text, parse_mode='HTML', reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "❌ Отмена")
+async def handle_cancel_button(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == SearchState.waiting_for_query:
+        await state.clear()
+        await message.answer("🚪 Вы вышли из режима поиска.", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("✅ Возврат в главное меню.", reply_markup=get_main_keyboard())
+
+# --- Обработчик поиска в состоянии ---
 @dp.message(SearchState.waiting_for_query)
 async def process_search_query(message: types.Message, state: FSMContext):
-    # Получаем текст сообщения (может быть длинным, с переводами строк)
+    # Обработка команды exit через кнопку
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("🚪 Вы вышли из режима поиска.", reply_markup=get_main_keyboard())
+        return
+
     query = message.text.strip()
     if not query:
         await message.answer("❌ Пустой запрос. Введите что-нибудь.")
         return
-    # Выполняем поиск
+
     ads = search_ads(query)
     if not ads:
         await message.answer(f"📭 По запросу «{query}» ничего не найдено.")
@@ -344,13 +466,14 @@ async def process_search_query(message: types.Message, state: FSMContext):
                 await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
             else:
                 await message.answer(text, parse_mode='HTML')
-    # Состояние не очищаем — остаёмся в режиме поиска
+        await message.answer("Продолжайте поиск или нажмите '❌ Отмена' для выхода.")
+    # Состояние не очищаем, остаёмся в режиме поиска
 
 # --- Добавление объявления с AI-модерацией ---
 @dp.message(Command('add'))
 async def cmd_add(message: types.Message, state: FSMContext):
-    await state.clear()  # выходим из любых состояний (в т.ч. поиска)
-    await message.answer("Введите название товара:")
+    await state.clear()
+    await message.answer("Введите название товара:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AddAd.title)
 
 @dp.message(AddAd.title)
@@ -403,9 +526,9 @@ async def add_photo(message: types.Message, state: FSMContext):
             user_id=message.from_user.id,
             username=message.from_user.username or "NoUsername"
         )
-        await message.answer("✅ Объявление прошло модерацию и опубликовано!")
+        await message.answer("✅ Объявление прошло модерацию и опубликовано!", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).")
+        await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
 
 @dp.message(AddAd.photo, Command('skip'))
@@ -423,9 +546,9 @@ async def skip_photo(message: types.Message, state: FSMContext):
             user_id=message.from_user.id,
             username=message.from_user.username or "NoUsername"
         )
-        await message.answer("✅ Объявление прошло модерацию и опубликовано!")
+        await message.answer("✅ Объявление прошло модерацию и опубликовано!", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).")
+        await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
 
 # --- Команда /list (все объявления) ---
@@ -434,7 +557,7 @@ async def cmd_list(message: types.Message, state: FSMContext):
     await state.clear()
     ads = get_all_ads()
     if not ads:
-        await message.answer("📭 Пока нет объявлений.")
+        await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
@@ -442,6 +565,7 @@ async def cmd_list(message: types.Message, state: FSMContext):
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML')
         else:
             await message.answer(text, parse_mode='HTML')
+    await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard())
 
 # --- Команда /categories ---
 @dp.message(Command('categories'))
@@ -475,7 +599,7 @@ async def cmd_myads(message: types.Message, state: FSMContext):
     await state.clear()
     user_ads = get_user_ads(message.from_user.id)
     if not user_ads:
-        await message.answer("📭 У вас пока нет объявлений.")
+        await message.answer("📭 У вас пока нет объявлений.", reply_markup=get_main_keyboard())
         return
     for ad in user_ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
@@ -491,6 +615,7 @@ async def cmd_myads(message: types.Message, state: FSMContext):
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=kb)
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=kb)
+    await message.answer("Вот ваши объявления", reply_markup=get_main_keyboard())
 
 # --- Редактирование ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("edit_"))
@@ -503,7 +628,7 @@ async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     if ad_data['user_id'] != callback.from_user.id:
         await callback.answer("❌ Это не ваше объявление.")
         return
-    await state.clear()  # выходим из любых режимов
+    await state.clear()
     await state.update_data(edit_ad_id=ad_id, edit_ad_data=ad_data)
     builder = InlineKeyboardBuilder()
     builder.button(text="📝 Название", callback_data="edit_title")
@@ -521,21 +646,21 @@ async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_title")
 async def edit_title_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое название товара:")
+    await callback.message.answer("Введите новое название товара:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(EditAd.editing_title)
     await callback.answer()
 
 @dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_description")
 async def edit_description_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое описание:")
+    await callback.message.answer("Введите новое описание:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(EditAd.editing_description)
     await callback.answer()
 
 @dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_price")
 async def edit_price_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новую цену (только число):")
+    await callback.message.answer("Введите новую цену (только число):", reply_markup=ReplyKeyboardRemove())
     await state.set_state(EditAd.editing_price)
     await callback.answer()
 
@@ -554,7 +679,7 @@ async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_photo")
 async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):")
+    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):", reply_markup=ReplyKeyboardRemove())
     await state.set_state(EditAd.editing_photo)
     await callback.answer()
 
@@ -562,7 +687,7 @@ async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
 async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("❌ Редактирование отменено.")
+    await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
     await callback.answer()
 
 @dp.message(EditAd.editing_title)
@@ -571,9 +696,9 @@ async def edit_title_finish(message: types.Message, state: FSMContext):
     ad_id = data['edit_ad_id']
     success = update_ad_field(ad_id, 'title', message.text)
     if success:
-        await message.answer("✅ Название обновлено!")
+        await message.answer("✅ Название обновлено!", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❌ Ошибка при обновлении.")
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
     await state.clear()
 
 @dp.message(EditAd.editing_description)
@@ -582,9 +707,9 @@ async def edit_description_finish(message: types.Message, state: FSMContext):
     ad_id = data['edit_ad_id']
     success = update_ad_field(ad_id, 'description', message.text)
     if success:
-        await message.answer("✅ Описание обновлено!")
+        await message.answer("✅ Описание обновлено!", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❌ Ошибка при обновлении.")
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
     await state.clear()
 
 @dp.message(EditAd.editing_price)
@@ -596,9 +721,9 @@ async def edit_price_finish(message: types.Message, state: FSMContext):
     ad_id = data['edit_ad_id']
     success = update_ad_field(ad_id, 'price', int(message.text))
     if success:
-        await message.answer("✅ Цена обновлена!")
+        await message.answer("✅ Цена обновлена!", reply_markup=get_main_keyboard())
     else:
-        await message.answer("❌ Ошибка при обновлении.")
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
     await state.clear()
 
 @dp.callback_query(EditAd.editing_category, lambda c: c.data and c.data.startswith("editcat_"))
@@ -609,9 +734,9 @@ async def edit_category_finish(callback: types.CallbackQuery, state: FSMContext)
     success = update_ad_field(ad_id, 'category', category)
     if success:
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("✅ Категория обновлена!")
+        await callback.message.answer("✅ Категория обновлена!", reply_markup=get_main_keyboard())
     else:
-        await callback.message.answer("❌ Ошибка при обновлении.")
+        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
     await state.clear()
     await callback.answer()
 
@@ -623,9 +748,9 @@ async def edit_photo_finish(message: types.Message, state: FSMContext):
     if photo_id:
         success = update_ad_photo(ad_id, photo_id)
         if success:
-            await message.answer("✅ Фото обновлено!")
+            await message.answer("✅ Фото обновлено!", reply_markup=get_main_keyboard())
         else:
-            await message.answer("❌ Ошибка при обновлении.")
+            await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
     else:
         await message.answer("❌ Фото не распознано. Попробуйте ещё раз или отправьте /skip.")
         return
@@ -633,7 +758,7 @@ async def edit_photo_finish(message: types.Message, state: FSMContext):
 
 @dp.message(EditAd.editing_photo, Command('skip'))
 async def edit_photo_skip(message: types.Message, state: FSMContext):
-    await message.answer("✅ Фото оставлено без изменений.")
+    await message.answer("✅ Фото оставлено без изменений.", reply_markup=get_main_keyboard())
     await state.clear()
 
 # --- Удаление ---
@@ -657,14 +782,14 @@ async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("confirm_del_", ""))
     success = delete_ad_by_id(ad_id)
     if success:
-        await callback.message.edit_text("✅ Объявление удалено.")
+        await callback.message.edit_text("✅ Объявление удалено.", reply_markup=get_main_keyboard())
     else:
-        await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).")
+        await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).", reply_markup=get_main_keyboard())
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "cancel_del")
 async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("❌ Удаление отменено.")
+    await callback.message.edit_text("❌ Удаление отменено.", reply_markup=get_main_keyboard())
     await callback.answer()
 
 # --- Запуск бота ---
