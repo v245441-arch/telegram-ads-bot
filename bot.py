@@ -88,6 +88,19 @@ def init_db():
                 UNIQUE(user_id, category)
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS complaints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ad_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'new',
+                FOREIGN KEY (ad_id) REFERENCES ads(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaints_ad_id ON complaints(ad_id)")
         conn.commit()
 
 def add_ad_to_db(title, description, price, category, photo_id, user_id, username):
@@ -320,6 +333,114 @@ def is_subscribed(user_id, category):
         cursor.execute("SELECT 1 FROM subscriptions WHERE user_id = ? AND category = ?", (user_id, category))
         return cursor.fetchone() is not None
 
+# --- Функции для работы с жалобами ---
+def add_complaint(ad_id, user_id, reason=''):
+    """Добавляет новую жалобу со статусом 'new'. Возвращает id жалобы."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO complaints (ad_id, user_id, reason, status)
+            VALUES (?, ?, ?, 'new')
+        """, (ad_id, user_id, reason))
+        conn.commit()
+        return cursor.lastrowid
+
+def get_new_complaints(limit=10):
+    """Возвращает список последних нерассмотренных жалоб (для админа)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.id, c.ad_id, c.user_id, c.reason, c.created_at, 
+                   a.title, a.description, a.price, a.category, a.username
+            FROM complaints c
+            JOIN ads a ON c.ad_id = a.id
+            WHERE c.status = 'new'
+            ORDER BY c.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        complaints = []
+        for row in rows:
+            complaints.append({
+                'id': row[0],
+                'ad_id': row[1],
+                'user_id': row[2],
+                'reason': row[3],
+                'created_at': row[4],
+                'ad_title': row[5],
+                'ad_description': row[6],
+                'ad_price': row[7],
+                'ad_category': row[8],
+                'ad_username': row[9]
+            })
+        return complaints
+
+def get_complaint_by_id(complaint_id):
+    """Получить данные конкретной жалобы."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.id, c.ad_id, c.user_id, c.reason, c.status, c.created_at,
+                   a.title, a.description, a.price, a.category, a.username
+            FROM complaints c
+            JOIN ads a ON c.ad_id = a.id
+            WHERE c.id = ?
+        """, (complaint_id,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                'id': row[0],
+                'ad_id': row[1],
+                'user_id': row[2],
+                'reason': row[3],
+                'status': row[4],
+                'created_at': row[5],
+                'ad_title': row[6],
+                'ad_description': row[7],
+                'ad_price': row[8],
+                'ad_category': row[9],
+                'ad_username': row[10]
+            }
+        return None
+
+def resolve_complaint(complaint_id):
+    """Меняет статус жалобы на 'resolved'."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE complaints SET status = 'resolved' WHERE id = ?", (complaint_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def delete_complaint(complaint_id):
+    """Полностью удаляет жалобу."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM complaints WHERE id = ?", (complaint_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def get_complaints_for_ad(ad_id):
+    """Все жалобы на конкретное объявление (для админа)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.id, c.user_id, c.reason, c.status, c.created_at
+            FROM complaints c
+            WHERE c.ad_id = ?
+            ORDER BY c.created_at DESC
+        """, (ad_id,))
+        rows = cursor.fetchall()
+        complaints = []
+        for row in rows:
+            complaints.append({
+                'id': row[0],
+                'user_id': row[1],
+                'reason': row[2],
+                'status': row[3],
+                'created_at': row[4]
+            })
+        return complaints
+
 # --- Статистика для админа ---
 def get_stats():
     """Возвращает словарь со статистикой."""
@@ -397,13 +518,16 @@ def get_search_keyboard():
     return keyboard
 
 def get_favorite_keyboard(user_id, ad_id):
-    """Создаёт inline-клавиатуру с кнопкой избранного."""
+    """Создаёт inline-клавиатуру с кнопкой избранного и жалобы."""
     is_fav = is_favorite(user_id, ad_id)
     if is_fav:
-        button = InlineKeyboardButton(text="✅ В избранном", callback_data=f"fav_remove_{ad_id}")
+        fav_button = InlineKeyboardButton(text="✅ В избранном", callback_data=f"fav_remove_{ad_id}")
     else:
-        button = InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav_add_{ad_id}")
-    return InlineKeyboardMarkup(inline_keyboard=[[button]])
+        fav_button = InlineKeyboardButton(text="⭐ В избранное", callback_data=f"fav_add_{ad_id}")
+    
+    complaint_button = InlineKeyboardButton(text="⚠️ Пожаловаться", callback_data=f"complaint_{ad_id}")
+    
+    return InlineKeyboardMarkup(inline_keyboard=[[fav_button, complaint_button]])
 
 # --- Состояния FSM для добавления ---
 class AddAd(StatesGroup):
@@ -1140,6 +1264,282 @@ async def remove_subscription_handler(callback: types.CallbackQuery):
             await callback.answer("🔕 Вы отписались от категории!")
     else:
         await callback.answer("⚠️ Вы не были подписаны на эту категорию")
+
+# --- Обработчики жалоб ---
+@dp.callback_query(lambda c: c.data and c.data.startswith("complaint_"))
+async def handle_complaint_button(callback: types.CallbackQuery):
+    """Обработчик кнопки '⚠️ Пожаловаться'."""
+    ad_id = int(callback.data.replace("complaint_", ""))
+    
+    # Создаём клавиатуру с выбором причины
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🚫 Спам", callback_data=f"complaint_reason_{ad_id}_spam")
+    builder.button(text="💰 Мошенничество", callback_data=f"complaint_reason_{ad_id}_fraud")
+    builder.button(text="🤬 Оскорбления", callback_data=f"complaint_reason_{ad_id}_abuse")
+    builder.button(text="📦 Другое", callback_data=f"complaint_reason_{ad_id}_other")
+    builder.adjust(1)
+    
+    await callback.message.answer(
+        "Выберите причину жалобы:",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("complaint_reason_"))
+async def handle_complaint_reason(callback: types.CallbackQuery):
+    """Обработчик выбора причины жалобы."""
+    # Разбираем callback_data: complaint_reason_<ad_id>_<reason>
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        await callback.answer("❌ Ошибка в данных жалобы.")
+        return
+    
+    ad_id = int(parts[2])
+    reason_type = parts[3]
+    
+    # Маппинг причин на читаемые названия
+    reason_map = {
+        'spam': '🚫 Спам',
+        'fraud': '💰 Мошенничество',
+        'abuse': '🤬 Оскорбления',
+        'other': '📦 Другое'
+    }
+    
+    reason_text = reason_map.get(reason_type, '📦 Другое')
+    
+    # Добавляем жалобу в базу
+    complaint_id = add_complaint(ad_id, callback.from_user.id, reason_text)
+    
+    if complaint_id:
+        # Уведомляем пользователя
+        await callback.message.edit_text("✅ Жалоба отправлена администратору. Спасибо за помощь!")
+        
+        # Отправляем уведомление администратору
+        await notify_admin_about_complaint(complaint_id)
+    else:
+        await callback.message.edit_text("❌ Не удалось отправить жалобу. Попробуйте позже.")
+    
+    await callback.answer()
+
+async def notify_admin_about_complaint(complaint_id):
+    """Отправляет уведомление администратору о новой жалобе."""
+    complaint = get_complaint_by_id(complaint_id)
+    if not complaint:
+        return
+    
+    # Получаем данные объявления
+    ad_data = get_ad_by_id(complaint['ad_id'])
+    if not ad_data:
+        return
+    
+    # Формируем текст уведомления
+    text = (
+        f"⚠️ *Новая жалоба*\n\n"
+        f"🆔 Объявление #{complaint['ad_id']}\n"
+        f"👤 Пользователь: @{complaint['ad_username']} (id: {complaint['user_id']})\n"
+        f"📝 Причина: {complaint['reason']}\n\n"
+        f"📌 *Объявление:*\n"
+        f"{complaint['ad_title']}\n"
+        f"{complaint['ad_description']}\n"
+        f"💰 {complaint['ad_price']} руб.\n"
+        f"Категория: {complaint['ad_category']}"
+    )
+    
+    # Создаём inline-клавиатуру для админа
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Пометить решённой", callback_data=f"resolve_complaint_{complaint_id}"),
+                InlineKeyboardButton(text="❌ Удалить объявление", callback_data=f"delete_ad_from_complaint_{complaint['ad_id']}_{complaint_id}")
+            ],
+            [
+                InlineKeyboardButton(text="⏳ Оставить", callback_data=f"ignore_complaint_{complaint_id}")
+            ]
+        ]
+    )
+    
+    try:
+        # Отправляем уведомление админу
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=text,
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logging.error(f"Ошибка отправки уведомления админу: {e}")
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("resolve_complaint_"))
+async def handle_resolve_complaint(callback: types.CallbackQuery):
+    """Обработчик кнопки '✅ Пометить решённой'."""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Эта кнопка только для администратора.")
+        return
+    
+    complaint_id = int(callback.data.replace("resolve_complaint_", ""))
+    
+    success = resolve_complaint(complaint_id)
+    if success:
+        await callback.message.edit_text(
+            f"✅ Жалоба #{complaint_id} помечена как решённая.",
+            reply_markup=None
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ Не удалось пометить жалобу как решённую.",
+            reply_markup=None
+        )
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("delete_ad_from_complaint_"))
+async def handle_delete_ad_from_complaint(callback: types.CallbackQuery):
+    """Обработчик кнопки '❌ Удалить объявление'."""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Эта кнопка только для администратора.")
+        return
+    
+    # Разбираем callback_data: delete_ad_from_complaint_<ad_id>_<complaint_id>
+    parts = callback.data.split("_")
+    if len(parts) < 6:
+        await callback.answer("❌ Ошибка в данных.")
+        return
+    
+    ad_id = int(parts[4])
+    complaint_id = int(parts[5])
+    
+    # Получаем данные жалобы для уведомления автора
+    complaint = get_complaint_by_id(complaint_id)
+    if not complaint:
+        await callback.answer("❌ Жалоба не найдена.")
+        return
+    
+    # Получаем данные объявления для уведомления автора
+    ad_data = get_ad_by_id(ad_id)
+    if not ad_data:
+        await callback.answer("❌ Объявление не найдено.")
+        return
+    
+    # Удаляем объявление (каскадно удалятся и все жалобы на него)
+    success = delete_ad_by_id(ad_id)
+    if success:
+        # Редактируем сообщение админу
+        await callback.message.edit_text(
+            f"❌ Объявление #{ad_id} удалено. Жалоба автоматически закрыта.",
+            reply_markup=None
+        )
+        
+        # Отправляем уведомление автору объявления
+        try:
+            await bot.send_message(
+                chat_id=ad_data['user_id'],
+                text=(
+                    f"❌ Ваше объявление '{complaint['ad_title']}' удалено по жалобе пользователя.\n"
+                    f"Причина: {complaint['reason']}.\n"
+                    f"Если вы считаете это ошибкой, свяжитесь с поддержкой."
+                )
+            )
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления автору объявления: {e}")
+    else:
+        await callback.message.edit_text(
+            f"❌ Не удалось удалить объявление.",
+            reply_markup=None
+        )
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("ignore_complaint_"))
+async def handle_ignore_complaint(callback: types.CallbackQuery):
+    """Обработчик кнопки '⏳ Оставить'."""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Эта кнопка только для администратора.")
+        return
+    
+    complaint_id = int(callback.data.replace("ignore_complaint_", ""))
+    
+    # Просто удаляем клавиатуру
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer("✅ Клавиатура удалена.")
+
+# --- Команда /complaints для админа ---
+@dp.message(Command('complaints'))
+async def cmd_complaints(message: types.Message, state: FSMContext):
+    """Показывает список нерассмотренных жалоб для админа."""
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Эта команда только для администратора.", reply_markup=get_main_keyboard())
+        return
+    
+    await state.clear()
+    complaints = get_new_complaints(limit=10)
+    
+    if not complaints:
+        await message.answer("📭 Нет нерассмотренных жалоб.", reply_markup=get_main_keyboard())
+        return
+    
+    text = "⚠️ *Нерассмотренные жалобы:*\n\n"
+    for i, complaint in enumerate(complaints, 1):
+        text += (
+            f"{i}. Жалоба #{complaint['id']}\n"
+            f"   Объявление: {complaint['ad_title'][:30]}...\n"
+            f"   Причина: {complaint['reason']}\n"
+            f"   Время: {complaint['created_at'][:16]}\n\n"
+        )
+    
+    # Создаём inline-кнопки для быстрого перехода
+    builder = InlineKeyboardBuilder()
+    for complaint in complaints[:5]:  # Ограничиваем 5 кнопками
+        builder.button(
+            text=f"Жалоба #{complaint['id']}",
+            callback_data=f"show_complaint_{complaint['id']}"
+        )
+    builder.adjust(1)
+    
+    await message.answer(text, parse_mode='HTML', reply_markup=builder.as_markup())
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("show_complaint_"))
+async def handle_show_complaint(callback: types.CallbackQuery):
+    """Показывает детали конкретной жалобы."""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Эта кнопка только для администратора.")
+        return
+    
+    complaint_id = int(callback.data.replace("show_complaint_", ""))
+    complaint = get_complaint_by_id(complaint_id)
+    
+    if not complaint:
+        await callback.answer("❌ Жалоба не найдена.")
+        return
+    
+    text = (
+        f"⚠️ *Детали жалобы #{complaint_id}*\n\n"
+        f"🆔 Объявление #{complaint['ad_id']}\n"
+        f"👤 Пользователь: @{complaint['ad_username']} (id: {complaint['user_id']})\n"
+        f"📝 Причина: {complaint['reason']}\n"
+        f"📅 Время: {complaint['created_at']}\n"
+        f"📊 Статус: {complaint['status']}\n\n"
+        f"📌 *Объявление:*\n"
+        f"{complaint['ad_title']}\n"
+        f"{complaint['ad_description']}\n"
+        f"💰 {complaint['ad_price']} руб.\n"
+        f"Категория: {complaint['ad_category']}"
+    )
+    
+    # Создаём клавиатуру для управления жалобой
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Пометить решённой", callback_data=f"resolve_complaint_{complaint_id}"),
+                InlineKeyboardButton(text="❌ Удалить объявление", callback_data=f"delete_ad_from_complaint_{complaint['ad_id']}_{complaint_id}")
+            ],
+            [
+                InlineKeyboardButton(text="⏳ Оставить", callback_data=f"ignore_complaint_{complaint_id}")
+            ]
+        ]
+    )
+    
+    await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    await callback.answer()
 
 # --- Функция отправки уведомлений подписчикам ---
 async def notify_subscribers(category, title, description, price, username, author_user_id=None, photo_id=None):
