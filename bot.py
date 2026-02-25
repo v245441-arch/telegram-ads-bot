@@ -6,21 +6,12 @@ from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiohttp import web
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Токен и URL из переменных окружения (обязательно!)
 API_TOKEN = os.getenv('BOT_TOKEN')
-BASE_WEBHOOK_URL = os.getenv('BASE_WEBHOOK_URL')
-WEBHOOK_PATH = '/webhook'
-
 if not API_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
-if not BASE_WEBHOOK_URL:
-    raise ValueError("BASE_WEBHOOK_URL не задан!")
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
@@ -107,70 +98,8 @@ async def cmd_list(message: types.Message):
         else:
             await message.answer(text, parse_mode='HTML')
 
-# --- Вебхук часть с улучшенным логированием ---
-async def on_startup(bot: Bot, base_url: str):
-    try:
-        webhook_url = f"{base_url}{WEBHOOK_PATH}"
-        await bot.set_webhook(webhook_url)
-        logging.info(f"✅ Вебхук установлен: {webhook_url}")
-    except Exception as e:
-        logging.exception(f"❌ Ошибка в on_startup: {e}")
-        raise
-
-async def on_shutdown(bot: Bot):
-    try:
-        await bot.delete_webhook()
-        logging.info("🔴 Вебхук удалён")
-    except Exception as e:
-        logging.exception(f"❌ Ошибка в on_shutdown: {e}")
-
 async def main():
-    try:
-        app = web.Application()
-
-        # Простой GET-обработчик для проверки доступности сервера
-        async def handle_get(request):
-            return web.Response(text="Бот работает!")
-        app.router.add_get('/', handle_get)
-        app.router.add_get('/webhook', handle_get)  # тоже для теста
-
-        # Регистрация обработчика вебхуков aiogram
-        webhook_requests_handler = SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot
-        )
-        webhook_requests_handler.register(app, path=WEBHOOK_PATH)
-
-        # Подключаем диспетчер к приложению (важно!)
-        setup_application(app, dp, bot=bot)
-
-        # Запуск и остановка
-        app.on_startup.append(lambda _: asyncio.create_task(on_startup(bot, BASE_WEBHOOK_URL)))
-        app.on_shutdown.append(lambda _: asyncio.create_task(on_shutdown(bot)))
-
-        # Получаем порт из переменной окружения (Railway задаёт PORT)
-        port = int(os.getenv('PORT', '8080'))
-
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host='0.0.0.0', port=port)
-        await site.start()
-
-        logging.info(f"🚀 Сервер запущен на порту {port}")
-        logging.info(f"🔗 Эндпоинт вебхука: {BASE_WEBHOOK_URL}{WEBHOOK_PATH}")
-
-        # Сообщение о входе в режим ожидания
-        logging.info("⏳ Вход в режим ожидания (await asyncio.Event().wait())")
-
-        # Ожидаем бесконечно
-        await asyncio.Event().wait()
-
-        # Это сообщение никогда не должно появиться, если ожидание работает
-        logging.info("⚠️ Выход из ожидания — что-то пошло не так")
-
-    except Exception as e:
-        logging.exception(f"❌ Критическая ошибка в main: {e}")
-        raise  # после логирования пробрасываем дальше, чтобы контейнер остановился с ошибкой
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
     asyncio.run(main())
