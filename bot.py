@@ -181,19 +181,22 @@ async def moderate_with_deepseek(text: str) -> bool:
         response = openai.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "Ты строгий модератор доски объявлений. Проверь текст на спам, нецензурную лексику, оскорбления, мошенничество. Ответь строго одним словом: 'ok' если объявление можно публиковать, 'fail' если есть нарушения."},
+                {"role": "system", "content": "Ты строгий модератор доски объявлений. Проверь текст на спам, нецензурную лексику, оскорбления, мошенничество. Ответь строго одним словом: либо 'ok' если объявление можно публиковать, либо 'fail' если есть нарушения. Не добавляй никаких пояснений, только одно слово."},
                 {"role": "user", "content": text}
             ],
             temperature=0.1,
-            max_tokens=10
+            max_tokens=20  # немного увеличим, чтобы модель могла ответить словом, но не расписывать
         )
         result = response.choices[0].message.content.strip().lower()
-        logging.info(f"DeepSeek ответил: {result}")
-        return result == "ok"
+        # Извлекаем первое слово из ответа (на случай, если модель добавила знаки препинания или пояснения)
+        first_word = result.split()[0] if result else ""
+        # Удаляем возможные знаки препинания в конце первого слова
+        first_word = first_word.rstrip('.,!?;:')
+        logging.info(f"DeepSeek ответил: {result}, первое слово: {first_word}")
+        return first_word == "ok"
     except Exception as e:
         logging.error(f"Ошибка DeepSeek API: {e}")
-        # При ошибке не публикуем объявление, чтобы не рисковать
-        return False
+        return False  # при ошибке не публикуем
 
 # --- Состояния FSM для добавления ---
 class AddAd(StatesGroup):
