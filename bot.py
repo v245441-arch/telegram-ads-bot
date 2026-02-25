@@ -11,29 +11,31 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Токен бота из переменных окружения
+# --- Переменные окружения ---
 API_TOKEN = os.getenv('BOT_TOKEN')
 if not API_TOKEN:
     raise ValueError("BOT_TOKEN не задан!")
 
-# Ключ DeepSeek API
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 if not DEEPSEEK_API_KEY:
     raise ValueError("DEEPSEEK_API_KEY не задан!")
 
-# Настройка клиента DeepSeek (совместим с OpenAI)
+ADMIN_ID = os.getenv('ADMIN_ID')
+if not ADMIN_ID:
+    raise ValueError("ADMIN_ID не задан! Укажите ID администратора.")
+ADMIN_ID = int(ADMIN_ID)
+
+# --- Настройка DeepSeek ---
 openai.api_key = DEEPSEEK_API_KEY
-# ВАЖНО: base_url должен оканчиваться на слеш, чтобы корректно формировался /v1/chat/completions
 openai.base_url = "https://api.deepseek.com/v1/"
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# --- Список категорий ---
+# --- Категории ---
 CATEGORIES = [
     "🏠 Недвижимость",
     "🚗 Транспорт",
@@ -43,11 +45,10 @@ CATEGORIES = [
     "📦 Другое"
 ]
 
-# --- Работа с базой данных SQLite ---
+# --- База данных ---
 DB_PATH = "ads.db"
 
 def init_db():
-    """Создаёт таблицу объявлений, если её нет."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -65,7 +66,6 @@ def init_db():
         conn.commit()
 
 def add_ad_to_db(title, description, price, category, photo_id, user_id, username):
-    """Добавляет новое объявление в базу."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -76,7 +76,6 @@ def add_ad_to_db(title, description, price, category, photo_id, user_id, usernam
         return cursor.lastrowid
 
 def get_all_ads():
-    """Возвращает список всех объявлений."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads ORDER BY id DESC")
@@ -94,7 +93,6 @@ def get_all_ads():
         return ads
 
 def get_ads_by_category(category):
-    """Возвращает объявления указанной категории."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
@@ -112,7 +110,6 @@ def get_ads_by_category(category):
         return ads
 
 def get_user_ads(user_id):
-    """Возвращает объявления конкретного пользователя."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, title, description, price, category, photo_id FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
@@ -130,7 +127,6 @@ def get_user_ads(user_id):
         return ads
 
 def get_ad_by_id(ad_id):
-    """Возвращает данные объявления по ID (для редактирования)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT title, description, price, category, photo_id, user_id FROM ads WHERE id = ?", (ad_id,))
@@ -147,7 +143,6 @@ def get_ad_by_id(ad_id):
         return None
 
 def update_ad_field(ad_id, field, value):
-    """Обновляет поле объявления (для редактирования)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(f"UPDATE ads SET {field} = ? WHERE id = ?", (value, ad_id))
@@ -155,7 +150,6 @@ def update_ad_field(ad_id, field, value):
         return cursor.rowcount > 0
 
 def update_ad_photo(ad_id, photo_id):
-    """Обновляет фото объявления."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE ads SET photo_id = ? WHERE id = ?", (photo_id, ad_id))
@@ -163,19 +157,40 @@ def update_ad_photo(ad_id, photo_id):
         return cursor.rowcount > 0
 
 def delete_ad_by_id(ad_id):
-    """Удаляет объявление по ID."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM ads WHERE id = ?", (ad_id,))
         conn.commit()
         return cursor.rowcount > 0
 
-# Инициализируем БД при запуске
+# --- Статистика для админа ---
+def get_stats():
+    """Возвращает словарь со статистикой."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        # Общее количество объявлений
+        cursor.execute("SELECT COUNT(*) FROM ads")
+        total_ads = cursor.fetchone()[0]
+        # Количество уникальных пользователей
+        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM ads")
+        total_users = cursor.fetchone()[0]
+        # Статистика по категориям
+        cursor.execute("SELECT category, COUNT(*) FROM ads GROUP BY category ORDER BY COUNT(*) DESC")
+        cat_stats = cursor.fetchall()
+        # Последние 5 объявлений
+        cursor.execute("SELECT id, title, price, username FROM ads ORDER BY id DESC LIMIT 5")
+        last_ads = cursor.fetchall()
+        return {
+            'total_ads': total_ads,
+            'total_users': total_users,
+            'category_stats': cat_stats,
+            'last_ads': last_ads
+        }
+
 init_db()
 
-# --- Функция AI-модерации через DeepSeek ---
+# --- AI-модерация ---
 async def moderate_with_deepseek(text: str) -> bool:
-    """Возвращает True, если объявление чистое, иначе False."""
     logging.info(f"Отправка текста на модерацию: {text[:50]}...")
     try:
         response = openai.chat.completions.create(
@@ -192,14 +207,12 @@ async def moderate_with_deepseek(text: str) -> bool:
         first_word = result.split()[0] if result else ""
         first_word = first_word.rstrip('.,!?;:')
         logging.info(f"DeepSeek ответил: {result}, первое слово: {first_word}")
-        logging.info(f"Полный ответ AI: {full_answer}")  # отладка
-        logging.info(f"Текст объявления: {text}")       # отладка
         return first_word == "ok"
     except Exception as e:
         logging.error(f"Ошибка DeepSeek API: {e}")
         return False
 
-# --- Состояния FSM для добавления ---
+# --- Состояния FSM ---
 class AddAd(StatesGroup):
     title = State()
     description = State()
@@ -207,7 +220,6 @@ class AddAd(StatesGroup):
     category = State()
     photo = State()
 
-# --- Состояния FSM для редактирования ---
 class EditAd(StatesGroup):
     choosing_field = State()
     editing_title = State()
@@ -226,8 +238,28 @@ async def cmd_start(message: types.Message):
         "/categories — показать объявления по категориям\n"
         "/myads — мои объявления"
     )
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("🔧 Вы администратор. Доступна команда /stats")
 
-# --- Добавление объявления с AI-модерацией ---
+# --- Команда /stats (только для админа) ---
+@dp.message(Command('stats'))
+async def cmd_stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Эта команда только для администратора.")
+        return
+    stats = get_stats()
+    text = f"📊 <b>Статистика бота</b>\n\n"
+    text += f"📝 Всего объявлений: {stats['total_ads']}\n"
+    text += f"👥 Уникальных пользователей: {stats['total_users']}\n\n"
+    text += "<b>По категориям:</b>\n"
+    for cat, count in stats['category_stats']:
+        text += f"  {cat}: {count}\n"
+    text += "\n<b>Последние 5 объявлений:</b>\n"
+    for ad_id, title, price, username in stats['last_ads']:
+        text += f"  • {title} — {price} руб. (от @{username})\n"
+    await message.answer(text, parse_mode='HTML')
+
+# --- Добавление объявления ---
 @dp.message(Command('add'))
 async def cmd_add(message: types.Message, state: FSMContext):
     await message.answer("Введите название товара:")
@@ -272,9 +304,7 @@ async def add_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     photo_id = message.photo[-1].file_id if message.photo else None
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
-    
     is_clean = await moderate_with_deepseek(full_text)
-    
     if is_clean:
         add_ad_to_db(
             title=data['title'],
@@ -288,16 +318,13 @@ async def add_photo(message: types.Message, state: FSMContext):
         await message.answer("✅ Объявление прошло модерацию и опубликовано!")
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).")
-    
     await state.clear()
 
 @dp.message(AddAd.photo, Command('skip'))
 async def skip_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
-    
     is_clean = await moderate_with_deepseek(full_text)
-    
     if is_clean:
         add_ad_to_db(
             title=data['title'],
@@ -311,10 +338,9 @@ async def skip_photo(message: types.Message, state: FSMContext):
         await message.answer("✅ Объявление прошло модерацию и опубликовано!")
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).")
-    
     await state.clear()
 
-# --- Команда /list (все объявления) ---
+# --- Команда /list ---
 @dp.message(Command('list'))
 async def cmd_list(message: types.Message):
     ads = get_all_ads()
@@ -353,14 +379,13 @@ async def show_category(callback: types.CallbackQuery):
             await callback.message.answer(text, parse_mode='HTML')
     await callback.answer()
 
-# --- Команда /myads (личный кабинет) ---
+# --- Команда /myads ---
 @dp.message(Command('myads'))
 async def cmd_myads(message: types.Message):
     user_ads = get_user_ads(message.from_user.id)
     if not user_ads:
         await message.answer("📭 У вас пока нет объявлений.")
         return
-
     for ad in user_ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
         kb = InlineKeyboardMarkup(
@@ -550,7 +575,7 @@ async def cancel_delete(callback: types.CallbackQuery):
     await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
-# --- Запуск бота ---
+# --- Запуск ---
 async def main():
     await bot.delete_webhook()
     logging.info("Webhook удалён, запускаем polling...")
