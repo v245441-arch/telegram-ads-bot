@@ -50,7 +50,7 @@ CATEGORIES = [
 DB_PATH = "ads.db"
 
 def init_db():
-    """Создаёт таблицу объявлений и избранного, если их нет."""
+    """Создаёт таблицу объявлений, избранного и подписок, если их нет."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -73,6 +73,15 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (ad_id) REFERENCES ads(id) ON DELETE CASCADE,
                 UNIQUE(user_id, ad_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, category)
             )
         """)
         conn.commit()
@@ -263,6 +272,50 @@ def is_favorite(user_id, ad_id):
         cursor.execute("SELECT 1 FROM favorites WHERE user_id = ? AND ad_id = ?", (user_id, ad_id))
         return cursor.fetchone() is not None
 
+# --- Функции для работы с подписками ---
+def add_subscription(user_id, category):
+    """Подписывает пользователя на категорию."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO subscriptions (user_id, category) VALUES (?, ?)", (user_id, category))
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Уже подписан
+            return False
+
+def remove_subscription(user_id, category):
+    """Отписывает пользователя от категории."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM subscriptions WHERE user_id = ? AND category = ?", (user_id, category))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def get_user_subscriptions(user_id):
+    """Возвращает список категорий, на которые подписан пользователь."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT category FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
+
+def get_subscribers_for_category(category):
+    """Возвращает список user_id подписчиков данной категории."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM subscriptions WHERE category = ?", (category,))
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
+
+def is_subscribed(user_id, category):
+    """Проверяет, подписан ли пользователь на категорию."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM subscriptions WHERE user_id = ? AND category = ?", (user_id, category))
+        return cursor.fetchone() is not None
+
 # --- Статистика для админа ---
 def get_stats():
     """Возвращает словарь со статистикой."""
@@ -323,7 +376,7 @@ def get_main_keyboard():
             [KeyboardButton(text="➕ Добавить объявление")],
             [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
             [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
-            [KeyboardButton(text="📊 Статистика")]
+            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -450,10 +503,12 @@ async def handle_categories_button(message: types.Message, state: FSMContext):
     await state.clear()
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
-        builder.button(text=cat, callback_data=f"show_{cat}")
+        is_sub = is_subscribed(message.from_user.id, cat)
+        button_text = f"{cat} {'🔕' if is_sub else '🔔'}"
+        builder.button(text=button_text, callback_data=f"show_{cat}")
     builder.adjust(1)
     await message.answer(
-        "Выберите категорию для просмотра:",
+        "Выберите категорию для просмотра:\n🔔 - не подписаны, 🔕 - подписаны",
         reply_markup=builder.as_markup()
     )
 
@@ -509,6 +564,26 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "🔔 Мои подписки")
+async def handle_mysubs_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    subscriptions = get_user_subscriptions(message.from_user.id)
+    if not subscriptions:
+        await message.answer("🔔 Вы пока не подписаны ни на одну категорию.", reply_markup=get_main_keyboard())
+        return
+    
+    text = "🔔 <b>Ваши подписки:</b>\n\n"
+    for category in subscriptions:
+        text += f"• {category}\n"
+    
+    # Создаём inline-кнопки для отписки
+    builder = InlineKeyboardBuilder()
+    for category in subscriptions:
+        builder.button(text=f"❌ Отписаться от {category}", callback_data=f"sub_remove_{category}")
+    builder.adjust(1)
+    
+    await message.answer(text, parse_mode='HTML', reply_markup=builder.as_markup())
 
 @dp.message(lambda message: message.text == "📊 Статистика")
 async def handle_stats_button(message: types.Message, state: FSMContext):
@@ -624,6 +699,17 @@ async def add_photo(message: types.Message, state: FSMContext):
             username=message.from_user.username or "NoUsername"
         )
         await message.answer("✅ Объявление прошло модерацию и опубликовано!", reply_markup=get_main_keyboard())
+        
+        # Отправляем уведомления подписчикам
+        await notify_subscribers(
+            category=data['category'],
+            title=data['title'],
+            description=data['description'],
+            price=data['price'],
+            username=message.from_user.username or "NoUsername",
+            author_user_id=message.from_user.id,
+            photo_id=photo_id
+        )
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
@@ -644,6 +730,17 @@ async def skip_photo(message: types.Message, state: FSMContext):
             username=message.from_user.username or "NoUsername"
         )
         await message.answer("✅ Объявление прошло модерацию и опубликовано!", reply_markup=get_main_keyboard())
+        
+        # Отправляем уведомления подписчикам
+        await notify_subscribers(
+            category=data['category'],
+            title=data['title'],
+            description=data['description'],
+            price=data['price'],
+            username=message.from_user.username or "NoUsername",
+            author_user_id=message.from_user.id,
+            photo_id=None
+        )
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
@@ -671,18 +768,43 @@ async def cmd_categories(message: types.Message, state: FSMContext):
     await state.clear()
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
-        builder.button(text=cat, callback_data=f"show_{cat}")
+        is_sub = is_subscribed(message.from_user.id, cat)
+        button_text = f"{cat} {'🔕' if is_sub else '🔔'}"
+        builder.button(text=button_text, callback_data=f"show_{cat}")
     builder.adjust(1)
-    await message.answer("Выберите категорию для просмотра:", reply_markup=builder.as_markup())
+    await message.answer(
+        "Выберите категорию для просмотра:\n🔔 - не подписаны, 🔕 - подписаны",
+        reply_markup=builder.as_markup()
+    )
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category(callback: types.CallbackQuery):
     category = callback.data.replace("show_", "")
     ads = get_ads_by_category(category)
+    
+    # Создаём клавиатуру с кнопкой подписки
+    is_sub = is_subscribed(callback.from_user.id, category)
+    if is_sub:
+        sub_button = InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")
+    else:
+        sub_button = InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{category}")
+    
+    sub_keyboard = InlineKeyboardMarkup(inline_keyboard=[[sub_button]])
+    
     if not ads:
-        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
+        await callback.message.answer(
+            f"В категории «{category}» пока нет объявлений.",
+            reply_markup=sub_keyboard
+        )
         await callback.answer()
         return
+    
+    # Отправляем сообщение с кнопкой подписки
+    await callback.message.answer(
+        f"📁 Категория: {category}\n\nВыберите объявление:",
+        reply_markup=sub_keyboard
+    )
+    
     for ad in ads:
         text = f"<b>{ad['title']}</b>\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
         keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
@@ -911,6 +1033,27 @@ async def cmd_favorites(message: types.Message, state: FSMContext):
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
 
+# --- Команда /mysubs ---
+@dp.message(Command('mysubs'))
+async def cmd_mysubs(message: types.Message, state: FSMContext):
+    await state.clear()
+    subscriptions = get_user_subscriptions(message.from_user.id)
+    if not subscriptions:
+        await message.answer("🔔 Вы пока не подписаны ни на одну категорию.", reply_markup=get_main_keyboard())
+        return
+    
+    text = "🔔 <b>Ваши подписки:</b>\n\n"
+    for category in subscriptions:
+        text += f"• {category}\n"
+    
+    # Создаём inline-кнопки для отписки
+    builder = InlineKeyboardBuilder()
+    for category in subscriptions:
+        builder.button(text=f"❌ Отписаться от {category}", callback_data=f"sub_remove_{category}")
+    builder.adjust(1)
+    
+    await message.answer(text, parse_mode='HTML', reply_markup=builder.as_markup())
+
 # --- Обработчики избранного ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("fav_add_"))
 async def add_to_favorites(callback: types.CallbackQuery):
@@ -956,6 +1099,83 @@ async def remove_from_favorites(callback: types.CallbackQuery):
                 await callback.answer("❌ Удалено из избранного")
     else:
         await callback.answer("⚠️ Не было в избранном")
+
+# --- Обработчики подписок ---
+@dp.callback_query(lambda c: c.data and c.data.startswith("sub_add_"))
+async def add_subscription_handler(callback: types.CallbackQuery):
+    category = callback.data.replace("sub_add_", "")
+    user_id = callback.from_user.id
+    
+    success = add_subscription(user_id, category)
+    if success:
+        # Обновляем кнопку
+        new_button = InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")
+        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[[new_button]])
+        try:
+            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+            await callback.answer("🔔 Вы подписались на категорию!")
+        except Exception as e:
+            await callback.answer("🔔 Вы подписались на категорию!")
+    else:
+        await callback.answer("⚠️ Вы уже подписаны на эту категорию")
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("sub_remove_"))
+async def remove_subscription_handler(callback: types.CallbackQuery):
+    category = callback.data.replace("sub_remove_", "")
+    user_id = callback.from_user.id
+    
+    success = remove_subscription(user_id, category)
+    if success:
+        # Обновляем кнопку
+        new_button = InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{category}")
+        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[[new_button]])
+        try:
+            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
+            await callback.answer("🔕 Вы отписались от категории!")
+        except Exception as e:
+            await callback.answer("🔕 Вы отписались от категории!")
+    else:
+        await callback.answer("⚠️ Вы не были подписаны на эту категорию")
+
+# --- Функция отправки уведомлений подписчикам ---
+async def notify_subscribers(category, title, description, price, username, author_user_id=None, photo_id=None):
+    """Отправляет уведомления всем подписчикам категории (кроме автора)."""
+    subscribers = get_subscribers_for_category(category)
+    if not subscribers:
+        return
+    
+    # Исключаем автора из списка получателей
+    if author_user_id is not None:
+        subscribers = [user_id for user_id in subscribers if user_id != author_user_id]
+    
+    if not subscribers:
+        return
+    
+    notification_text = (
+        f"🔔 Новое объявление в категории {category}:\n\n"
+        f"<b>{title}</b>\n"
+        f"{description}\n"
+        f"💰 {price} руб.\n"
+        f"Автор: @{username}"
+    )
+    
+    for user_id in subscribers:
+        try:
+            if photo_id:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_id,
+                    caption=notification_text,
+                    parse_mode='HTML'
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=notification_text,
+                    parse_mode='HTML'
+                )
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
 
 # --- Запуск бота ---
 async def main():
