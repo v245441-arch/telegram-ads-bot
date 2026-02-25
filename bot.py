@@ -26,6 +26,7 @@ if not DEEPSEEK_API_KEY:
 
 # Настройка клиента DeepSeek (совместим с OpenAI)
 openai.api_key = DEEPSEEK_API_KEY
+# ВАЖНО: base_url должен оканчиваться на слеш, чтобы корректно формировался /v1/chat/completions
 openai.base_url = "https://api.deepseek.com/v1/"
 
 bot = Bot(token=API_TOKEN)
