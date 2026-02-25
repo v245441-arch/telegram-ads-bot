@@ -99,6 +99,9 @@ async def cmd_list(message: types.Message):
             await message.answer(text, parse_mode='HTML')
 
 async def main():
+    # Удаляем вебхук перед запуском polling, чтобы избежать конфликта
+    await bot.delete_webhook()
+    logging.info("Webhook удалён (если был), запускаем polling...")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
