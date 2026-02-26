@@ -12,6 +12,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
 
+# Создаём директорию для базы данных на Railway Volume
+os.makedirs("/app/data", exist_ok=True)
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
@@ -68,7 +71,7 @@ YAKUTSK_DISTRICTS = [
 ]
 
 # --- Работа с базой данных SQLite ---
-DB_PATH = "ads.db"
+DB_PATH = "/app/data/ads.db"
 
 def init_db():
     """Создаёт все необходимые таблицы, если их нет. НЕ удаляет существующие данные."""
