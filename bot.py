@@ -724,6 +724,8 @@ async def handle_list_button(message: types.Message, state: FSMContext):
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
