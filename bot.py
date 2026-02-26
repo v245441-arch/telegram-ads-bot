@@ -1074,8 +1074,9 @@ async def cmd_list(message: types.Message, state: FSMContext):
         return
     for ad in ads:
         # Добавляем информацию о районе, если она есть
-        district_info = f"\n📍 {ad.get('district', '')}" if ad.get('district') else ""
-        text = f"<b>{ad['title']}</b> [{ad['category']}]{district_info}\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
