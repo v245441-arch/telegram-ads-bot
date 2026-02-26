@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
@@ -334,8 +335,8 @@ def is_subscribed(user_id, category):
         return cursor.fetchone() is not None
 
 # --- Функции для работы с жалобами ---
-def add_complaint(ad_id, user_id, reason=''):
-    """Добавляет новую жалобу со статусом 'new'. Возвращает id жалобы."""
+async def add_complaint(ad_id, user_id, reason=''):
+    """Добавляет новую жалобу со статусом 'new'. Возвращает id жалобы и отправляет уведомление администратору."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -343,7 +344,60 @@ def add_complaint(ad_id, user_id, reason=''):
             VALUES (?, ?, ?, 'new')
         """, (ad_id, user_id, reason))
         conn.commit()
-        return cursor.lastrowid
+        complaint_id = cursor.lastrowid
+        
+        # Получаем данные объявления для уведомления
+        cursor.execute("""
+            SELECT a.title, a.description, a.price, a.category, a.username, a.user_id
+            FROM ads a WHERE a.id = ?
+        """, (ad_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            ad_title, ad_description, ad_price, ad_category, ad_username, ad_user_id = row
+            
+            # Формируем текст уведомления
+            text = (
+                f"⚠️ *Новая жалоба*\n\n"
+                f"🆔 Жалоба #{complaint_id}\n"
+                f"📌 Объявление #{ad_id}\n"
+                f"👤 Автор объявления: @{ad_username} (id: {ad_user_id})\n"
+                f"👤 Пожаловался пользователь: id {user_id}\n"
+                f"📝 Причина: {reason}\n"
+                f"🕐 Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                f"📌 *Объявление:*\n"
+                f"<b>{ad_title}</b>\n"
+                f"{ad_description}\n"
+                f"💰 {ad_price} руб.\n"
+                f"🏷️ Категория: {ad_category}"
+            )
+            
+            # Создаём inline-клавиатуру для админа
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Пометить решённой", callback_data=f"resolve_complaint_{complaint_id}"),
+                        InlineKeyboardButton(text="❌ Удалить объявление", callback_data=f"delete_ad_from_complaint_{ad_id}_{complaint_id}")
+                    ],
+                    [
+                        InlineKeyboardButton(text="⏳ Оставить", callback_data=f"ignore_complaint_{complaint_id}")
+                    ]
+                ]
+            )
+            
+            try:
+                # Отправляем уведомление админу
+                await bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=text,
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
+                logging.info(f"Уведомление о жалобе #{complaint_id} отправлено администратору")
+            except Exception as e:
+                logging.error(f"Ошибка отправки уведомления админу: {e}")
+        
+        return complaint_id
 
 def get_new_complaints(limit=10):
     """Возвращает список последних нерассмотренных жалоб (для админа)."""
@@ -1307,15 +1361,12 @@ async def handle_complaint_reason(callback: types.CallbackQuery):
     
     reason_text = reason_map.get(reason_type, '📦 Другое')
     
-    # Добавляем жалобу в базу
-    complaint_id = add_complaint(ad_id, callback.from_user.id, reason_text)
+    # Добавляем жалобу в базу (асинхронно)
+    complaint_id = await add_complaint(ad_id, callback.from_user.id, reason_text)
     
     if complaint_id:
         # Уведомляем пользователя
         await callback.message.edit_text("✅ Жалоба отправлена администратору. Спасибо за помощь!")
-        
-        # Отправляем уведомление администратору
-        await notify_admin_about_complaint(complaint_id)
     else:
         await callback.message.edit_text("❌ Не удалось отправить жалобу. Попробуйте позже.")
     
@@ -1325,24 +1376,22 @@ async def notify_admin_about_complaint(complaint_id):
     """Отправляет уведомление администратору о новой жалобе."""
     complaint = get_complaint_by_id(complaint_id)
     if not complaint:
-        return
-    
-    # Получаем данные объявления
-    ad_data = get_ad_by_id(complaint['ad_id'])
-    if not ad_data:
+        logging.error(f"Жалоба #{complaint_id} не найдена")
         return
     
     # Формируем текст уведомления
     text = (
         f"⚠️ *Новая жалоба*\n\n"
-        f"🆔 Объявление #{complaint['ad_id']}\n"
-        f"👤 Пользователь: @{complaint['ad_username']} (id: {complaint['user_id']})\n"
-        f"📝 Причина: {complaint['reason']}\n\n"
+        f"🆔 Жалоба #{complaint['id']}\n"
+        f"📌 Объявление #{complaint['ad_id']}\n"
+        f"👤 Автор объявления: @{complaint['ad_username']} (id: {complaint['user_id']})\n"
+        f"📝 Причина: {complaint['reason']}\n"
+        f"🕐 Время: {complaint['created_at']}\n\n"
         f"📌 *Объявление:*\n"
-        f"{complaint['ad_title']}\n"
+        f"<b>{complaint['ad_title']}</b>\n"
         f"{complaint['ad_description']}\n"
         f"💰 {complaint['ad_price']} руб.\n"
-        f"Категория: {complaint['ad_category']}"
+        f"🏷️ Категория: {complaint['ad_category']}"
     )
     
     # Создаём inline-клавиатуру для админа
@@ -1366,6 +1415,7 @@ async def notify_admin_about_complaint(complaint_id):
             parse_mode='HTML',
             reply_markup=keyboard
         )
+        logging.info(f"Уведомление о жалобе #{complaint_id} отправлено администратору")
     except Exception as e:
         logging.error(f"Ошибка отправки уведомления админу: {e}")
 
