@@ -911,8 +911,8 @@ async def choose_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
 
     builder = InlineKeyboardBuilder()
-    for district in YAKUTSK_DISTRICTS:
-        builder.button(text=district, callback_data=f"dist_{district}")
+    for i, district in enumerate(YAKUTSK_DISTRICTS):
+        builder.button(text=district, callback_data=f"dist_{i}")
     builder.adjust(1)
     await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.district)
@@ -921,12 +921,28 @@ async def choose_category(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(AddAd.district)
 async def choose_district(callback: types.CallbackQuery, state: FSMContext):
     """Обработчик выбора района."""
-    district = callback.data.replace("dist_", "")
-    await state.update_data(district=district)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Отправьте фото товара (или /skip):")
-    await state.set_state(AddAd.photo)
-    await callback.answer()
+    try:
+        # Извлекаем индекс из callback_data
+        index_str = callback.data.replace("dist_", "")
+        index = int(index_str)
+        
+        # Получаем район по индексу из списка YAKUTSK_DISTRICTS
+        if 0 <= index < len(YAKUTSK_DISTRICTS):
+            district = YAKUTSK_DISTRICTS[index]
+        else:
+            district = "📍 Другой район"
+            
+        await state.update_data(district=district)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Отправьте фото товара (или /skip):")
+        await state.set_state(AddAd.photo)
+        await callback.answer()
+    except (ValueError, IndexError):
+        # Если произошла ошибка при обработке индекса
+        await callback.answer("❌ Ошибка при выборе района. Попробуйте снова.")
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Произошла ошибка. Пожалуйста, начните добавление объявления заново.")
+        await state.clear()
 
 @dp.message(AddAd.photo)
 async def add_photo(message: types.Message, state: FSMContext):
