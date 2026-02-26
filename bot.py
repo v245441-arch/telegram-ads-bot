@@ -907,7 +907,6 @@ async def add_price(message: types.Message, state: FSMContext):
     await state.set_state(AddAd.category)
 
 @dp.callback_query(AddAd.category)
-@dp.callback_query(AddAd.category)
 async def choose_category(callback: types.CallbackQuery, state: FSMContext):
     category = callback.data.replace("cat_", "")
     await state.update_data(category=category)
@@ -919,15 +918,6 @@ async def choose_category(callback: types.CallbackQuery, state: FSMContext):
     builder.adjust(1)
     await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.district)
-    await callback.answer()
-
-@dp.callback_query(AddAd.district)
-async def choose_district(callback: types.CallbackQuery, state: FSMContext):
-    district = callback.data.replace("dist_", "")
-    await state.update_data(district=district)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Отправьте фото товара (или /skip):")
-    await state.set_state(AddAd.photo)
     await callback.answer()
 
 @dp.callback_query(AddAd.district)
