@@ -1499,13 +1499,70 @@ async def handle_delete_ad_from_complaint(callback: types.CallbackQuery):
     
     await callback.answer()
 
+@dp.callback_query(lambda c: c.data and c.data.startswith("delete_ad_complaint_"))
+async def handle_delete_ad_complaint(callback: types.CallbackQuery):
+    """Обработчик кнопки '❌ Удалить объявление' (альтернативный формат)."""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Эта кнопка только для администратора.")
+        return
+    
+    # Разбираем callback_data: delete_ad_complaint_<ad_id>_<complaint_id>
+    parts = callback.data.split("_")
+    if len(parts) < 5:
+        await callback.answer("❌ Ошибка в данных.")
+        return
+    
+    ad_id = int(parts[3])
+    complaint_id = int(parts[4])
+    
+    # Получаем данные жалобы для уведомления автора
+    complaint = get_complaint_by_id(complaint_id)
+    if not complaint:
+        await callback.answer("❌ Жалоба не найдена.")
+        return
+    
+    # Получаем данные объявления для уведомления автора
+    ad_data = get_ad_by_id(ad_id)
+    if not ad_data:
+        await callback.answer("❌ Объявление не найдено.")
+        return
+    
+    # Удаляем объявление (каскадно удалятся и все жалобы на него)
+    success = delete_ad_by_id(ad_id)
+    if success:
+        # Редактируем сообщение админу
+        await callback.message.edit_text(
+            f"❌ Объявление #{ad_id} удалено. Жалоба автоматически закрыта.",
+            reply_markup=None
+        )
+        
+        # Отправляем уведомление автору объявления
+        try:
+            await bot.send_message(
+                chat_id=ad_data['user_id'],
+                text=(
+                    f"❌ Ваше объявление '{complaint['ad_title']}' удалено по жалобе пользователя.\n"
+                    f"Причина: {complaint['reason']}.\n"
+                    f"Если вы считаете это ошибкой, свяжитесь с поддержкой."
+                )
+            )
+        except Exception as e:
+            logging.error(f"Ошибка отправки уведомления автору объявления: {e}")
+    else:
+        await callback.message.edit_text(
+            f"❌ Не удалось удалить объявление.",
+            reply_markup=None
+        )
+    
+    await callback.answer()
+
 @dp.callback_query(lambda c: c.data and c.data.startswith("ignore_complaint_"))
 async def handle_ignore_complaint(callback: types.CallbackQuery):
     """Обработчик кнопки '⏳ Оставить'."""
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Эта кнопка только для администратора.")
         return
-    
+
     complaint_id = int(callback.data.replace("ignore_complaint_", ""))
     
     # Просто удаляем клавиатуру
