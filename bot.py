@@ -72,7 +72,6 @@ YAKUTSK_DISTRICTS = [
 DB_PATH = "ads.db"
 
 def init_db():
-def init_db():
     """Создаёт все необходимые таблицы, если их нет. НЕ удаляет существующие данные."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
