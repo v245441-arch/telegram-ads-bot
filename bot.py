@@ -1320,17 +1320,23 @@ async def remove_subscription_handler(callback: types.CallbackQuery):
         await callback.answer("⚠️ Вы не были подписаны на эту категорию")
 
 # --- Обработчики жалоб ---
-@dp.callback_query(lambda c: c.data and c.data.startswith("complaint_"))
+@dp.callback_query(lambda c: c.data and c.data.startswith("complaint_") and not c.data.startswith("complaint_reason_"))
 async def handle_complaint_button(callback: types.CallbackQuery):
     """Обработчик кнопки '⚠️ Пожаловаться'."""
-    ad_id = int(callback.data.replace("complaint_", ""))
+    # Убираем префикс "complaint_" и получаем ID объявления
+    ad_id_str = callback.data.replace("complaint_", "")
+    try:
+        ad_id = int(ad_id_str)
+    except ValueError:
+        await callback.answer("❌ Ошибка в данных жалобы.")
+        return
     
     # Создаём клавиатуру с выбором причины
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚫 Спам", callback_data=f"complaint_reason_{ad_id}_spam")
-    builder.button(text="💰 Мошенничество", callback_data=f"complaint_reason_{ad_id}_fraud")
-    builder.button(text="🤬 Оскорбления", callback_data=f"complaint_reason_{ad_id}_abuse")
-    builder.button(text="📦 Другое", callback_data=f"complaint_reason_{ad_id}_other")
+    builder.button(text="🚫 Спам", callback_data=f"reason_{ad_id}_spam")
+    builder.button(text="💰 Мошенничество", callback_data=f"reason_{ad_id}_fraud")
+    builder.button(text="🤬 Оскорбления", callback_data=f"reason_{ad_id}_abuse")
+    builder.button(text="📦 Другое", callback_data=f"reason_{ad_id}_other")
     builder.adjust(1)
     
     await callback.message.answer(
@@ -1339,17 +1345,17 @@ async def handle_complaint_button(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("complaint_reason_"))
+@dp.callback_query(lambda c: c.data and c.data.startswith("reason_"))
 async def handle_complaint_reason(callback: types.CallbackQuery):
     """Обработчик выбора причины жалобы."""
-    # Разбираем callback_data: complaint_reason_<ad_id>_<reason>
+    # Разбираем callback_data: reason_<ad_id>_<reason>
     parts = callback.data.split("_")
-    if len(parts) < 4:
+    if len(parts) < 3:
         await callback.answer("❌ Ошибка в данных жалобы.")
         return
     
-    ad_id = int(parts[2])
-    reason_type = parts[3]
+    ad_id = int(parts[1])
+    reason_type = parts[2]
     
     # Маппинг причин на читаемые названия
     reason_map = {
