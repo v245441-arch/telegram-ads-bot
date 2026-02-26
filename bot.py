@@ -47,17 +47,30 @@ CATEGORIES = [
     "📦 Другое"
 ]
 
+# --- Список районов Якутска ---
+YAKUTSK_DISTRICTS = [
+    "🏙️ Центральный округ",
+    "🏘️ Автодорожный округ",
+    "🏡 Гагаринский округ",
+    "🏢 Октябрьский округ",
+    "🏬 Промышленный округ",
+    "🏭 Строительный округ",
+    "🌳 Сайсарский округ",
+    "🌲 Тулагино-Кильдямский наслег",
+    "🏞️ Пригородный район",
+    "📍 Другой район"
+]
+
 # --- Работа с базой данных SQLite ---
 DB_PATH = "ads.db"
 
 def init_db():
-    """
-    Создаёт таблицы объявлений, избранного и подписок, если их нет.
-    Безопасна для существующих данных: использует CREATE TABLE IF NOT EXISTS.
-    Никогда не удаляет существующие таблицы или данные.
-    """
+def init_db():
+    """Создаёт все необходимые таблицы, если их нет. НЕ удаляет существующие данные."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
+
+        # Таблица объявлений (с district)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS ads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,11 +78,14 @@ def init_db():
                 description TEXT NOT NULL,
                 price INTEGER NOT NULL,
                 category TEXT NOT NULL,
+                district TEXT,
                 photo_id TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT
             )
         """)
+
+        # Таблица избранного
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +97,8 @@ def init_db():
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id)")
+
+        # Таблица подписок на категории
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +109,8 @@ def init_db():
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)")
+
+        # Таблица жалоб
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS complaints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,16 +124,16 @@ def init_db():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaints_status ON complaints(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaints_ad_id ON complaints(ad_id)")
+
         conn.commit()
 
-def add_ad_to_db(title, description, price, category, photo_id, user_id, username):
-    """Добавляет новое объявление в базу."""
+def add_ad_to_db(title, description, price, category, district, photo_id, user_id, username):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO ads (title, description, price, category, photo_id, user_id, username)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (title, description, price, category, photo_id, user_id, username))
+            INSERT INTO ads (title, description, price, category, district, photo_id, user_id, username)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, description, price, category, district, photo_id, user_id, username))
         conn.commit()
         return cursor.lastrowid
 
@@ -121,7 +141,7 @@ def get_all_ads():
     """Возвращает список всех объявлений."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, photo_id, username FROM ads ORDER BY id DESC")
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -131,8 +151,9 @@ def get_all_ads():
                 'description': row[2],
                 'price': row[3],
                 'category': row[4],
-                'photo': row[5],
-                'username': row[6]
+                'district': row[5],
+                'photo': row[6],
+                'username': row[7]
             })
         return ads
 
@@ -140,7 +161,7 @@ def get_ads_by_category(category):
     """Возвращает объявления указанной категории."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -150,8 +171,29 @@ def get_ads_by_category(category):
                 'description': row[2],
                 'price': row[3],
                 'category': row[4],
-                'photo': row[5],
-                'username': row[6]
+                'district': row[5],
+                'photo': row[6],
+                'username': row[7]
+            })
+        return ads
+
+def get_ads_by_district(district):
+    """Возвращает объявления указанного района."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads WHERE district = ? ORDER BY id DESC", (district,))
+        rows = cursor.fetchall()
+        ads = []
+        for row in rows:
+            ads.append({
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'district': row[5],
+                'photo': row[6],
+                'username': row[7]
             })
         return ads
 
@@ -591,6 +633,7 @@ class AddAd(StatesGroup):
     description = State()
     price = State()
     category = State()
+    district = State()
     photo = State()
 
 # --- Состояния FSM для редактирования ---
@@ -862,6 +905,23 @@ async def choose_category(callback: types.CallbackQuery, state: FSMContext):
     category = callback.data.replace("cat_", "")
     await state.update_data(category=category)
     await callback.message.edit_reply_markup(reply_markup=None)
+    
+    # Показываем кнопки с районами
+    builder = InlineKeyboardBuilder()
+    for district in YAKUTSK_DISTRICTS:
+        builder.button(text=district, callback_data=f"dist_{district}")
+    builder.adjust(1)
+    
+    await callback.message.answer("Выберите район Якутска:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.district)
+    await callback.answer()
+
+@dp.callback_query(AddAd.district)
+async def choose_district(callback: types.CallbackQuery, state: FSMContext):
+    """Обработчик выбора района."""
+    district = callback.data.replace("dist_", "")
+    await state.update_data(district=district)
+    await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("Отправьте фото товара (или /skip):")
     await state.set_state(AddAd.photo)
     await callback.answer()
@@ -878,6 +938,7 @@ async def add_photo(message: types.Message, state: FSMContext):
             description=data['description'],
             price=data['price'],
             category=data['category'],
+            district=data.get('district', '📍 Другой район'),
             photo_id=photo_id,
             user_id=message.from_user.id,
             username=message.from_user.username or "NoUsername"
@@ -909,6 +970,7 @@ async def skip_photo(message: types.Message, state: FSMContext):
             description=data['description'],
             price=data['price'],
             category=data['category'],
+            district=data.get('district', '📍 Другой район'),
             photo_id=None,
             user_id=message.from_user.id,
             username=message.from_user.username or "NoUsername"
@@ -929,6 +991,41 @@ async def skip_photo(message: types.Message, state: FSMContext):
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
 
+# --- Команда /by_district (объявления по району) ---
+@dp.message(Command('by_district'))
+async def cmd_by_district(message: types.Message, state: FSMContext):
+    """Показывает список районов для выбора."""
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    for district in YAKUTSK_DISTRICTS:
+        builder.button(text=district, callback_data=f"bydist_{district}")
+    builder.adjust(1)
+    await message.answer("Выберите район Якутска для просмотра объявлений:", reply_markup=builder.as_markup())
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("bydist_"))
+async def show_district_ads(callback: types.CallbackQuery):
+    """Показывает объявления выбранного района."""
+    district = callback.data.replace("bydist_", "")
+    ads = get_ads_by_district(district)
+    
+    if not ads:
+        await callback.message.answer(f"📭 В районе «{district}» пока нет объявлений.")
+        await callback.answer()
+        return
+    
+    await callback.message.answer(f"📍 Объявления в районе: {district}")
+    
+    for ad in ads:
+        # Добавляем информацию о районе в текст объявления
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n📍 {ad['district']}\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
+        if ad['photo']:
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    
+    await callback.answer()
+
 # --- Команда /list (все объявления) ---
 @dp.message(Command('list'))
 async def cmd_list(message: types.Message, state: FSMContext):
@@ -938,7 +1035,9 @@ async def cmd_list(message: types.Message, state: FSMContext):
         await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
         return
     for ad in ads:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        # Добавляем информацию о районе, если она есть
+        district_info = f"\n📍 {ad.get('district', '')}" if ad.get('district') else ""
+        text = f"<b>{ad['title']}</b> [{ad['category']}]{district_info}\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
