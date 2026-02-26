@@ -151,7 +151,7 @@ def get_all_ads():
                 'description': row[2],
                 'price': row[3],
                 'category': row[4],
-                'district': row[5],  # Поле district уже включено
+                'district': row[5],
                 'photo': row[6],
                 'username': row[7]
             })
