@@ -752,6 +752,8 @@ async def handle_myads_button(message: types.Message, state: FSMContext):
         return
     for ad in user_ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -787,6 +789,8 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
     await message.answer("⭐ Ваши избранные объявления:")
     for ad in favorites:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"fav_remove_{ad['id']}")]]
         )
@@ -864,6 +868,8 @@ async def process_search_query(message: types.Message, state: FSMContext):
         await message.answer(f"🔍 Результаты поиска по запросу «{query}»:")
         for ad in ads:
             text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+            if ad.get('district'):
+                text += f"\n📍 Район: {ad['district']}"
             keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
             if ad['photo']:
                 await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
@@ -1129,6 +1135,8 @@ async def show_category(callback: types.CallbackQuery):
     
     for ad in ads:
         text = f"<b>{ad['title']}</b>\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
         if ad['photo']:
             await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
