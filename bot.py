@@ -611,7 +611,8 @@ def get_main_keyboard():
             [KeyboardButton(text="➕ Добавить объявление")],
             [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
             [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
-            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")]
+            [KeyboardButton(text="📍 По району"), KeyboardButton(text="🔔 Мои подписки")],
+            [KeyboardButton(text="📊 Статистика")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -809,6 +810,15 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
+
+@dp.message(lambda message: message.text == "📍 По району")
+async def handle_by_district_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    for district in YAKUTSK_DISTRICTS:
+        builder.button(text=district, callback_data=f"district_{district}")
+    builder.adjust(1)
+    await message.answer("Выберите район для просмотра:", reply_markup=builder.as_markup())
 
 @dp.message(lambda message: message.text == "🔔 Мои подписки")
 async def handle_mysubs_button(message: types.Message, state: FSMContext):
@@ -1037,29 +1047,8 @@ async def cmd_by_district(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("district_"))
 async def show_district(callback: types.CallbackQuery):
-    district = callback.data.replace("district_", "")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads WHERE district = ? ORDER BY id DESC", (district,))
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await callback.message.answer(f"В районе «{district}» пока нет объявлений.")
-        await callback.answer()
-        return
-
-    for row in rows:
-        text = f"<b>{row[0]}</b> [{row[3]}]\n{row[1]}\n💰 {row[2]} руб.\n👤 @{row[5]}\n📍 Район: {district}"
-        if row[4]:
-            await callback.message.answer_photo(photo=row[4], caption=text, parse_mode='HTML')
-        else:
-            await callback.message.answer(text, parse_mode='HTML')
-    await callback.answer()
-@dp.callback_query(lambda c: c.data and c.data.startswith("bydist_"))
-async def show_district_ads(callback: types.CallbackQuery):
     """Показывает объявления выбранного района."""
-    district = callback.data.replace("bydist_", "")
+    district = callback.data.replace("district_", "")
     ads = get_ads_by_district(district)
     
     if not ads:
@@ -1070,8 +1059,10 @@ async def show_district_ads(callback: types.CallbackQuery):
     await callback.message.answer(f"📍 Объявления в районе: {district}")
     
     for ad in ads:
-        # Добавляем информацию о районе в текст объявления
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n📍 {ad['district']}\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        # Формируем текст объявления так же, как в /list
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        if ad.get('district'):
+            text += f"\n📍 Район: {ad['district']}"
         keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
         if ad['photo']:
             await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
