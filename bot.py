@@ -80,6 +80,7 @@ def init_db():
                 UNIQUE(user_id, ad_id)
             )
         """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +90,7 @@ def init_db():
                 UNIQUE(user_id, category)
             )
         """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS complaints (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
