@@ -145,22 +145,20 @@ def add_ad_to_db(title, description, price, category, district, photo_id, user_i
         return cursor.lastrowid
 
 def get_all_ads():
-    """Возвращает список всех объявлений."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
+        cursor.execute("SELECT title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
         rows = cursor.fetchall()
         ads = []
         for row in rows:
             ads.append({
-                'id': row[0],
-                'title': row[1],
-                'description': row[2],
-                'price': row[3],
-                'category': row[4],
-                'district': row[5],
-                'photo': row[6],
-                'username': row[7]
+                'title': row[0],
+                'description': row[1],
+                'price': row[2],
+                'category': row[3],
+                'district': row[4],
+                'photo': row[5],
+                'username': row[6]
             })
         return ads
 
