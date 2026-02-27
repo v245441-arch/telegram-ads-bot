@@ -12,9 +12,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
 
-# Создаём директорию для базы данных на Railway Volume
-os.makedirs("/app/data", exist_ok=True)
-
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
@@ -71,7 +68,7 @@ YAKUTSK_DISTRICTS = [
 ]
 
 # --- Работа с базой данных SQLite ---
-DB_PATH = "/app/data/ads.db"
+DB_PATH = "ads.db"
 
 def init_db():
     """Создаёт все необходимые таблицы, если их нет. НЕ удаляет существующие данные."""
@@ -611,8 +608,7 @@ def get_main_keyboard():
             [KeyboardButton(text="➕ Добавить объявление")],
             [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
             [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
-            [KeyboardButton(text="📍 По району"), KeyboardButton(text="🔔 Мои подписки")],
-            [KeyboardButton(text="📊 Статистика")]
+            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -725,8 +721,6 @@ async def handle_list_button(message: types.Message, state: FSMContext):
         return
     for ad in ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-        if ad.get('district'):
-            text += f"\n📍 Район: {ad['district']}"
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
@@ -810,15 +804,6 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
-
-@dp.message(lambda message: message.text == "📍 По району")
-async def handle_by_district_button(message: types.Message, state: FSMContext):
-    await state.clear()
-    builder = InlineKeyboardBuilder()
-    for i, district in enumerate(YAKUTSK_DISTRICTS):
-        builder.button(text=district, callback_data=f"district_{i}")
-    builder.adjust(1)
-    await message.answer("Выберите район для просмотра:", reply_markup=builder.as_markup())
 
 @dp.message(lambda message: message.text == "🔔 Мои подписки")
 async def handle_mysubs_button(message: types.Message, state: FSMContext):
@@ -1040,48 +1025,55 @@ async def skip_photo(message: types.Message, state: FSMContext):
 async def cmd_by_district(message: types.Message, state: FSMContext):
     await state.clear()
     builder = InlineKeyboardBuilder()
-    for i, district in enumerate(YAKUTSK_DISTRICTS):
-        builder.button(text=district, callback_data=f"district_{i}")
+    for district in YAKUTSK_DISTRICTS:
+        builder.button(text=district, callback_data=f"district_{district}")
     builder.adjust(1)
     await message.answer("Выберите район для просмотра:", reply_markup=builder.as_markup())
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("district_"))
 async def show_district(callback: types.CallbackQuery):
-    """Показывает объявления выбранного района."""
-    try:
-        # Извлекаем индекс из callback_data
-        idx_str = callback.data.replace("district_", "")
-        idx = int(idx_str)
-        
-        # Получаем район по индексу из списка YAKUTSK_DISTRICTS
-        if 0 <= idx < len(YAKUTSK_DISTRICTS):
-            district = YAKUTSK_DISTRICTS[idx]
-        else:
-            district = "📍 Другой район"
-        
-        ads = get_ads_by_district(district)
-        
-        if not ads:
-            await callback.message.answer(f"📭 В районе «{district}» пока нет объявлений.")
-            await callback.answer()
-            return
-        
-        await callback.message.answer(f"📍 Объявления в районе: {district}")
-        
-        for ad in ads:
-            # Формируем текст объявления так же, как в /list
-            text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-            if ad.get('district'):
-                text += f"\n📍 Район: {ad['district']}"
-            keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
-            if ad['photo']:
-                await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
-            else:
-                await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
-        
+    district = callback.data.replace("district_", "")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, description, price, category, photo_id, username FROM ads WHERE district = ? ORDER BY id DESC", (district,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await callback.message.answer(f"В районе «{district}» пока нет объявлений.")
         await callback.answer()
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка при обработке выбора района.")
+        return
+
+    for row in rows:
+        text = f"<b>{row[0]}</b> [{row[3]}]\n{row[1]}\n💰 {row[2]} руб.\n👤 @{row[5]}\n📍 Район: {district}"
+        if row[4]:
+            await callback.message.answer_photo(photo=row[4], caption=text, parse_mode='HTML')
+        else:
+            await callback.message.answer(text, parse_mode='HTML')
+    await callback.answer()
+@dp.callback_query(lambda c: c.data and c.data.startswith("bydist_"))
+async def show_district_ads(callback: types.CallbackQuery):
+    """Показывает объявления выбранного района."""
+    district = callback.data.replace("bydist_", "")
+    ads = get_ads_by_district(district)
+    
+    if not ads:
+        await callback.message.answer(f"📭 В районе «{district}» пока нет объявлений.")
+        await callback.answer()
+        return
+    
+    await callback.message.answer(f"📍 Объявления в районе: {district}")
+    
+    for ad in ads:
+        # Добавляем информацию о районе в текст объявления
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n📍 {ad['district']}\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
+        if ad['photo']:
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    
+    await callback.answer()
 
 # --- Команда /list (все объявления) ---
 @dp.message(Command('list'))
@@ -1182,7 +1174,55 @@ async def cmd_myads(message: types.Message, state: FSMContext):
     await message.answer("Вот ваши объявления", reply_markup=get_main_keyboard())
 
 # --- Редактирование ---
-@dp.callback_query(lambda c: c.data and c.data.startswith("edit_"))
+# --- Редактирование: выбор поля (должны быть выше общего обработчика) ---
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_title')
+async def edit_title_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новое название товара:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_title)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_description')
+async def edit_description_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новое описание:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_description)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_price')
+async def edit_price_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новую цену (только число):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_price)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_category')
+async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    for cat in CATEGORIES:
+        builder.button(text=cat, callback_data=f"editcat_{cat}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите новую категорию:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_category)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_photo')
+async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_photo)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_cancel')
+async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("edit_") and c.data.replace("edit_", "").isdigit())
 async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("edit_", ""))
     ad_data = get_ad_by_id(ad_id)
@@ -1205,53 +1245,6 @@ async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("Что вы хотите изменить?", reply_markup=builder.as_markup())
     await state.set_state(EditAd.choosing_field)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_title")
-async def edit_title_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое название товара:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_title)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_description")
-async def edit_description_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое описание:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_description)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_price")
-async def edit_price_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новую цену (только число):", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_price)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_category")
-async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
-    builder = InlineKeyboardBuilder()
-    for cat in CATEGORIES:
-        builder.button(text=cat, callback_data=f"editcat_{cat}")
-    builder.button(text="❌ Отмена", callback_data="edit_cancel")
-    builder.adjust(1)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Выберите новую категорию:", reply_markup=builder.as_markup())
-    await state.set_state(EditAd.editing_category)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_photo")
-async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_photo)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == "edit_cancel")
-async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
     await callback.answer()
 
 @dp.message(EditAd.editing_title)
