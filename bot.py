@@ -68,10 +68,12 @@ YAKUTSK_DISTRICTS = [
 ]
 
 # --- Работа с базой данных SQLite ---
-DB_PATH = "ads.db"
+DB_PATH = "/app/data/ads.db"
 
 def init_db():
     """Создаёт все необходимые таблицы, если их нет. НЕ удаляет существующие данные."""
+    # Создаем директорию для базы данных, если её нет
+    os.makedirs("/app/data", exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         # Таблица объявлений
