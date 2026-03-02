@@ -1226,7 +1226,7 @@ async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data and c.data.startswith("edit_") and c.data.replace("edit_", "").isdigit())
+@dp.callback_query(lambda c: c.data and c.data.startswith("edit_") and c.data.replace("edit_", "").isdigit() and len(c.data.split('_')) == 2)
 async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("edit_", ""))
     ad_data = get_ad_by_id(ad_id)
