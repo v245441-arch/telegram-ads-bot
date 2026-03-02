@@ -11,6 +11,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
+from dotenv import load_dotenv
+load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -147,18 +149,19 @@ def add_ad_to_db(title, description, price, category, district, photo_id, user_i
 def get_all_ads():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
         rows = cursor.fetchall()
         ads = []
         for row in rows:
             ads.append({
-                'title': row[0],
-                'description': row[1],
-                'price': row[2],
-                'category': row[3],
-                'district': row[4],
-                'photo': row[5],
-                'username': row[6]
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'district': row[5],
+                'photo': row[6],
+                'username': row[7]
             })
         return ads
 
@@ -251,17 +254,18 @@ def get_ad_by_id(ad_id):
     """Возвращает данные объявления по ID (для редактирования)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT title, description, price, category, district, photo_id, user_id FROM ads WHERE id = ?", (ad_id,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, user_id FROM ads WHERE id = ?", (ad_id,))
         row = cursor.fetchone()
         if row:
             return {
-                'title': row[0],
-                'description': row[1],
-                'price': row[2],
-                'category': row[3],
-                'district': row[4],
-                'photo': row[5],
-                'user_id': row[6]
+                'id': row[0],
+                'title': row[1],
+                'description': row[2],
+                'price': row[3],
+                'category': row[4],
+                'district': row[5],
+                'photo': row[6],
+                'user_id': row[7]
             }
         return None
 
