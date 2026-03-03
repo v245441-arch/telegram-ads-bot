@@ -1159,12 +1159,14 @@ async def add_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
     await message.answer("Теперь введите описание:")
     await state.set_state(AddAd.description)
+    logging.info(f"Title saved: {message.text}")
 
 @dp.message(AddAd.description)
 async def add_description(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
     await message.answer("Введите цену (только число):")
     await state.set_state(AddAd.price)
+    logging.info(f"Description saved: {message.text}")
 
 @dp.message(AddAd.price)
 async def add_price(message: types.Message, state: FSMContext):
@@ -1178,6 +1180,7 @@ async def add_price(message: types.Message, state: FSMContext):
     builder.adjust(1)
     await message.answer("Выберите категорию:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.category)
+    logging.info(f"Price saved: {message.text}")
 
 @dp.callback_query(AddAd.category)
 async def choose_category(callback: types.CallbackQuery, state: FSMContext):
@@ -1224,6 +1227,7 @@ async def choose_district(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AddAd.photo)
 async def add_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
+    logging.info(f"Data in add_photo: {data}")
     photo_id = message.photo[-1].file_id if message.photo else None
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
     is_clean = await moderate_with_deepseek(full_text)
