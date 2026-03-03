@@ -1390,42 +1390,28 @@ async def cmd_categories(message: types.Message, state: FSMContext):
     )
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
-async def show_category(callback: types.CallbackQuery):
+async def show_category_ads(callback: types.CallbackQuery):
     category = callback.data.replace("show_", "")
-    ads = get_ads_by_category(category)
-    
-    # Создаём клавиатуру с кнопкой подписки
-    is_sub = is_subscribed(callback.from_user.id, category)
-    if is_sub:
-        sub_button = InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")
-    else:
-        sub_button = InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{category}")
-    
-    sub_keyboard = InlineKeyboardMarkup(inline_keyboard=[[sub_button]])
-    
-    if not ads:
-        await callback.message.answer(
-            f"В категории «{category}» пока нет объявлений.",
-            reply_markup=sub_keyboard
-        )
+    logging.info(f"Просмотр категории: {category}")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC",
+        (category,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows:
+        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
         await callback.answer()
         return
-    
-    # Отправляем сообщение с кнопкой подписки
-    await callback.message.answer(
-        f"📁 Категория: {category}\n\nВыберите объявление:",
-        reply_markup=sub_keyboard
-    )
-    
-    for ad in ads:
-        text = f"<b>{ad['title']}</b>\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-        if ad.get('district'):
-            text += f"\n📍 Район: {ad['district']}"
-        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
-        if ad['photo']:
-            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+    await callback.message.answer(f"📂 Объявления в категории «{category}»:")
+    for row in rows:
+        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[5]}"
+        if row[5]:
+            await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
         else:
-            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+            await callback.message.answer(text, parse_mode='HTML')
     await callback.answer()
 
 # --- Команда /myads (личный кабинет) ---
