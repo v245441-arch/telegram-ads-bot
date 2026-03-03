@@ -50,12 +50,17 @@ dp = Dispatcher(storage=storage)
 
 # --- Список категорий ---
 CATEGORIES = [
-    "🏠 Недвижимость",
-    "🚗 Транспорт",
-    "📱 Электроника",
-    "👗 Одежда",
-    "🔧 Услуги",
-    "📦 Другое"
+    "👶 Детская одежда",
+    "🚼 Коляски и автокресла",
+    "🛏️ Мебель для детей",
+    "🧸 Игрушки",
+    "📚 Книги и развивашки",
+    "🍼 Товары для кормления",
+    "🛁 Купание и гигиена",
+    "👟 Детская обувь",
+    "🎒 Школьные товары",
+    "🤱 Услуги (няни, репетиторы)",
+    "💬 Советы и обсуждения"
 ]
 
 # --- Список районов Якутска ---
@@ -106,6 +111,22 @@ def init_db():
             cursor.execute("ALTER TABLE ads ADD COLUMN district TEXT")
         except sqlite3.OperationalError:
             pass  # колонка уже существует
+        
+        # Добавляем новые поля для детских объявлений
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN age_group TEXT")
+        except sqlite3.OperationalError:
+            pass  # поле уже существует
+        
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN gender TEXT")
+        except sqlite3.OperationalError:
+            pass  # поле уже существует
+        
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN condition TEXT")
+        except sqlite3.OperationalError:
+            pass  # поле уже существует
         # Таблица избранного
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
@@ -145,20 +166,20 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaints_ad_id ON complaints(ad_id)")
         conn.commit()
 
-def add_ad_to_db(title, description, price, category, district, photo_id, user_id, username):
+def add_ad_to_db(title, description, price, category, district, photo_id, user_id, username, age_group=None, gender=None, condition=None):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO ads (title, description, price, category, district, photo_id, user_id, username)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title, description, price, category, district, photo_id, user_id, username))
+            INSERT INTO ads (title, description, price, category, district, photo_id, user_id, username, age_group, gender, condition)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, description, price, category, district, photo_id, user_id, username, age_group, gender, condition))
         conn.commit()
         return cursor.lastrowid
 
 def get_all_ads():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads ORDER BY id DESC")
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username, age_group, gender, condition FROM ads ORDER BY id DESC")
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -170,15 +191,18 @@ def get_all_ads():
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'username': row[7]
+                'username': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             })
         return ads
 
 def get_ads_by_category(category):
-    """Возвращает объявления указанной категории."""
+    """Возвращает объявления указанной категории.""" 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC", (category,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username, age_group, gender, condition FROM ads WHERE category = ? ORDER BY id DESC", (category,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -190,15 +214,18 @@ def get_ads_by_category(category):
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'username': row[7]
+                'username': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             })
         return ads
 
 def get_ads_by_district(district):
-    """Возвращает объявления указанного района."""
+    """Возвращает объявления указанного района.""" 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username FROM ads WHERE district = ? ORDER BY id DESC", (district,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, username, age_group, gender, condition FROM ads WHERE district = ? ORDER BY id DESC", (district,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -210,7 +237,10 @@ def get_ads_by_district(district):
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'username': row[7]
+                'username': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             })
         return ads
 
@@ -650,14 +680,97 @@ def get_favorite_keyboard(user_id, ad_id):
     
     return InlineKeyboardMarkup(inline_keyboard=[[fav_button, complaint_button]])
 
+def format_ad_text(ad):
+    """Форматирует текст объявления с учётом новых полей."""
+    text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+    
+    # Добавляем информацию о районе, если она есть
+    if ad.get('district'):
+        text += f"\n📍 Район: {ad['district']}"
+    
+    # Добавляем возрастную группу, если она есть
+    if ad.get('age_group'):
+        text += f"\n👶 Возраст: {ad['age_group']}"
+    
+    # Добавляем пол, если он есть
+    if ad.get('gender'):
+        text += f"\n🚻 Пол: {ad['gender']}"
+    
+    # Добавляем состояние, если оно есть
+    if ad.get('condition'):
+        text += f"\n📦 Состояние: {ad['condition']}"
+    
+    return text
+
 # --- Состояния FSM для добавления ---
 class AddAd(StatesGroup):
     title = State()
     description = State()
     price = State()
     category = State()
+    age_group = State()
+    gender = State()
+    condition = State()
     district = State()
     photo = State()
+
+# --- Обработчики выбора возрастной группы ---
+@dp.callback_query(AddAd.age_group)
+async def choose_age_group(callback: types.CallbackQuery, state: FSMContext):
+    age_group = callback.data.replace("age_", "")
+    await state.update_data(age_group=age_group)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    
+    # Показываем кнопки с выбором пола
+    builder = InlineKeyboardBuilder()
+    builder.button(text="👶 Мальчик", callback_data="gender_boy")
+    builder.button(text="👧 Девочка", callback_data="gender_girl")
+    builder.button(text="🚻 Унисекс", callback_data="gender_unisex")
+    builder.adjust(1)
+    await callback.message.answer("Выберите пол:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.gender)
+    await callback.answer()
+
+# --- Обработчики выбора пола ---
+@dp.callback_query(AddAd.gender)
+async def choose_gender(callback: types.CallbackQuery, state: FSMContext):
+    gender = callback.data.replace("gender_", "")
+    await state.update_data(gender=gender)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    
+    # Показываем кнопки с выбором состояния
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🆕 Новое", callback_data="condition_new")
+    builder.button(text="🔧 Б/у", callback_data="condition_used")
+    builder.button(text="⭐ Отличное", callback_data="condition_excellent")
+    builder.button(text="👍 Хорошее", callback_data="condition_good")
+    builder.button(text="🆗 Удовлетворительное", callback_data="condition_satisfactory")
+    builder.adjust(1)
+    await callback.message.answer("Выберите состояние:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.condition)
+    await callback.answer()
+
+# --- Обработчики выбора состояния ---
+@dp.callback_query(AddAd.condition)
+async def choose_condition(callback: types.CallbackQuery, state: FSMContext):
+    condition = callback.data.replace("condition_", "")
+    await state.update_data(condition=condition)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    
+    # Показываем кнопки с выбором района
+    builder = InlineKeyboardBuilder()
+    for i, district in enumerate(YAKUTSK_DISTRICTS):
+        builder.button(text=district, callback_data=f"dist_{i}")
+    builder.adjust(1)
+    await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.district)
+    await callback.answer()
+
+# --- Логирование всех callback-запросов ---
+@dp.callback_query()
+async def log_all_callbacks(callback: types.CallbackQuery):
+    logging.warning(f"Unhandled callback: {callback.data} from user {callback.from_user.id}")
+    await callback.answer()  # чтобы кнопка не "висела" в нажатом состоянии
 
 # --- Состояния FSM для редактирования ---
 class EditAd(StatesGroup):
@@ -752,8 +865,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
     logging.info(f"Вызвана команда {message.text} от {message.from_user.id}")
     await state.clear()
     await message.answer(
-        "👋 Добро пожаловать в доску объявлений!\n"
-        "Используйте кнопки ниже для навигации.",
+        "👋 Привет, мамочка! 👶\n"
+        "Это доска объявлений для мам и малышей. Здесь можно продать, купить, обменять детские вещи, найти няню или просто спросить совета.\n"
+        "Команды:\n"
+        "/add — добавить объявление\n"
+        "/list — показать все объявления\n"
+        "/categories — выбрать категорию\n"
+        "/myads — мои объявления\n"
+        "/search — поиск\n"
+        "/support — помощь",
         reply_markup=get_main_keyboard()
     )
     if message.from_user.id == ADMIN_ID:
@@ -809,7 +929,7 @@ async def handle_list_button(message: types.Message, state: FSMContext):
         await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
         return
     for ad in ads:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        text = format_ad_text(ad)
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
@@ -882,9 +1002,7 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
         return
     await message.answer("⭐ Ваши избранные объявления:")
     for ad in favorites:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-        if ad.get('district'):
-            text += f"\n📍 Район: {ad['district']}"
+        text = format_ad_text(ad)
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"fav_remove_{ad['id']}")]]
         )
@@ -1011,12 +1129,14 @@ async def choose_category(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(category=category)
     await callback.message.edit_reply_markup(reply_markup=None)
 
+    # Показываем кнопки с возрастными группами
     builder = InlineKeyboardBuilder()
-    for i, district in enumerate(YAKUTSK_DISTRICTS):
-        builder.button(text=district, callback_data=f"dist_{i}")
+    age_groups = ["0–3 мес", "3–12 мес", "1–3 года", "3–7 лет", "7–12 лет"]
+    for age_group in age_groups:
+        builder.button(text=age_group, callback_data=f"age_{age_group}")
     builder.adjust(1)
-    await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
-    await state.set_state(AddAd.district)
+    await callback.message.answer("Выберите возрастную группу:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.age_group)
     await callback.answer()
 
 @dp.callback_query(AddAd.district)
@@ -1175,10 +1295,7 @@ async def cmd_list(message: types.Message, state: FSMContext):
         await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
         return
     for ad in ads:
-        # Добавляем информацию о районе, если она есть
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
-        if ad.get('district'):
-            text += f"\n📍 Район: {ad['district']}"
+        text = format_ad_text(ad)
         keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
         if ad['photo']:
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
@@ -1453,7 +1570,7 @@ async def cmd_favorites(message: types.Message, state: FSMContext):
         return
     await message.answer("⭐ Ваши избранные объявления:")
     for ad in favorites:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
+        text = format_ad_text(ad)
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"fav_remove_{ad['id']}")]]
         )
@@ -1827,7 +1944,7 @@ async def handle_ignore_complaint(callback: types.CallbackQuery):
 # --- Команда /complaints для админа ---
 @dp.message(Command('complaints'))
 async def cmd_complaints(message: types.Message, state: FSMContext):
-    """Показывает список нерассмотренных жалоб для админа."""
+    """Показывает список нерассмотренных жалоб для админа.""" 
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Эта команда только для администратора.", reply_markup=get_main_keyboard())
         return

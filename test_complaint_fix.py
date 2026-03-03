@@ -110,7 +110,7 @@ def test_callback_parsing():
         complaint_id = int(callback_data.replace("show_complaint_", ""))
         print(f"  ID жалобы: {complaint_id}")
     
-    return True
+    # Тест завершён успешно
 
 def test_keyboard_generation():
     """Тестируем генерацию клавиатур."""
@@ -144,7 +144,7 @@ def test_keyboard_generation():
     for cb in old_callbacks:
         print(f"  - {cb}")
     
-    return True
+    # Тест завершён успешно
 
 def main():
     print("🧪 Начинаем тестирование исправления конфликта обработчиков жалоб...")

@@ -7,10 +7,12 @@
 import asyncio
 import sys
 import os
+import pytest
 
 # Добавляем текущую директорию в путь для импорта
 sys.path.append('.')
 
+@pytest.mark.asyncio
 async def test_complaint_notification():
     """Тестирует функцию add_complaint и отправку уведомлений администратору."""
     try:
@@ -113,9 +115,12 @@ async def test_complaint_notification():
         traceback.print_exc()
         return False
 
+# pytest-asyncio will run the async test directly
+
+
 if __name__ == '__main__':
-    # Запускаем тест
-    success = asyncio.run(test_complaint_notification())
+    # Запускаем тест вручную
+    success = asyncio.run(_test_complaint_notification())
     
     if success:
         print('\n🎉 Все тесты пройдены успешно!')

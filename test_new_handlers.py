@@ -53,27 +53,21 @@ def test_complaint_reason_handler():
     parts = callback.data.split("_")
     print(f"📊 Разобранные части: {parts}")
     
-    if len(parts) >= 4:
-        ad_id = int(parts[2])
-        reason_type = parts[3]
-        print(f"✅ ID объявления: {ad_id}")
-        print(f"✅ Тип причины: {reason_type}")
-        
-        # Проверяем маппинг причин
-        reason_map = {
-            'spam': '🚫 Спам',
-            'fraud': '💰 Мошенничество',
-            'abuse': '🤬 Оскорбления',
-            'other': '📦 Другое'
-        }
-        
-        reason_text = reason_map.get(reason_type, '📦 Другое')
-        print(f"✅ Текст причины: {reason_text}")
-        
-        return True
-    else:
-        print("❌ Ошибка: недостаточно частей в callback_data")
-        return False
+    assert len(parts) >= 4, "Недостаточно частей в callback_data"
+    ad_id = int(parts[2])
+    reason_type = parts[3]
+    print(f"✅ ID объявления: {ad_id}")
+    print(f"✅ Тип причины: {reason_type}")
+
+    reason_map = {
+        'spam': '🚫 Спам',
+        'fraud': '💰 Мошенничество',
+        'abuse': '🤬 Оскорбления',
+        'other': '📦 Другое'
+    }
+
+    reason_text = reason_map.get(reason_type, '📦 Другое')
+    print(f"✅ Текст причины: {reason_text}")
 
 def test_delete_ad_complaint_handler():
     """Тестируем обработчик delete_ad_complaint_"""
@@ -84,21 +78,14 @@ def test_delete_ad_complaint_handler():
     parts = callback_data.split("_")
     print(f"📊 Разобранные части: {parts}")
     
-    if len(parts) >= 5:
-        ad_id = int(parts[3])
-        complaint_id = int(parts[4])
-        print(f"✅ ID объявления: {ad_id}")
-        print(f"✅ ID жалобы: {complaint_id}")
-        
-        # Создаём тестовый callback для администратора
-        callback = MockCallback(callback_data, 123456789)  # ADMIN_ID
-        
-        # Проверяем логику обработки
-        print(f"✅ Обработчик корректно разбирает данные")
-        return True
-    else:
-        print("❌ Ошибка: недостаточно частей в callback_data")
-        return False
+    assert len(parts) >= 5, "Недостаточно частей в callback_data"
+    ad_id = int(parts[3])
+    complaint_id = int(parts[4])
+    print(f"✅ ID объявления: {ad_id}")
+    print(f"✅ ID жалобы: {complaint_id}")
+
+    callback = MockCallback(callback_data, 123456789)  # ADMIN_ID
+    print(f"✅ Обработчик корректно разбирает данные")
 
 def test_delete_ad_from_complaint_handler():
     """Тестируем обработчик delete_ad_from_complaint_"""
@@ -109,21 +96,14 @@ def test_delete_ad_from_complaint_handler():
     parts = callback_data.split("_")
     print(f"📊 Разобранные части: {parts}")
     
-    if len(parts) >= 6:
-        ad_id = int(parts[4])
-        complaint_id = int(parts[5])
-        print(f"✅ ID объявления: {ad_id}")
-        print(f"✅ ID жалобы: {complaint_id}")
-        
-        # Создаём тестовый callback для администратора
-        callback = MockCallback(callback_data, 123456789)  # ADMIN_ID
-        
-        # Проверяем логику обработки
-        print(f"✅ Обработчик корректно разбирает данные")
-        return True
-    else:
-        print("❌ Ошибка: недостаточно частей в callback_data")
-        return False
+    assert len(parts) >= 6, "Недостаточно частей в callback_data"
+    ad_id = int(parts[4])
+    complaint_id = int(parts[5])
+    print(f"✅ ID объявления: {ad_id}")
+    print(f"✅ ID жалобы: {complaint_id}")
+
+    callback = MockCallback(callback_data, 123456789)  # ADMIN_ID
+    print(f"✅ Обработчик корректно разбирает данные")
 
 def main():
     print("🧪 Начинаем тестирование обработчиков жалоб...")

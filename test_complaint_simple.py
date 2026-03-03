@@ -9,6 +9,7 @@ import sys
 import os
 import sqlite3
 from datetime import datetime
+import pytest
 
 # Добавляем текущую директорию в путь для импорта
 sys.path.append('.')
@@ -140,6 +141,7 @@ def add_ad_to_db(title, description, price, category, photo_id, user_id, usernam
         conn.commit()
         return cursor.lastrowid
 
+@pytest.mark.asyncio
 async def test_complaint_system():
     """Тестирует систему жалоб."""
     print("🧪 Начинаем тестирование системы жалоб...")
@@ -225,6 +227,14 @@ async def test_complaint_system():
 if __name__ == '__main__':
     # Запускаем тест
     success = asyncio.run(test_complaint_system())
+    
+# pytest-asyncio will run the async test directly
+
+
+if __name__ == '__main__':
+    # Запускаем тест вручную
+    import asyncio
+    success = asyncio.run(_test_complaint_system())
     
     if success:
         print('\n🎉 Все тесты пройдены успешно!')
