@@ -11,6 +11,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
+from aiohttp_socks import ProxyConnector
+import aiohttp
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -2062,9 +2064,17 @@ async def notify_subscribers(category, title, description, price, username, auth
 
 # --- Запуск бота ---
 async def main():
-    await bot.delete_webhook()
+    proxy_url = os.getenv('PROXY_URL')  # например, socks5://127.0.0.1:1080
+    if proxy_url:
+        connector = ProxyConnector.from_url(proxy_url)
+        bot_with_proxy = Bot(token=API_TOKEN, connector=connector)
+        logging.info(f"Using proxy: {proxy_url}")
+    else:
+        bot_with_proxy = Bot(token=API_TOKEN)
+    
+    await bot_with_proxy.delete_webhook()
     logging.info("Webhook удалён, запускаем polling...")
-    await dp.start_polling(bot)
+    await dp.start_polling(bot_with_proxy)
 
 if __name__ == '__main__':
     asyncio.run(main())
