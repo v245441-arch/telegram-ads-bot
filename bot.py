@@ -1773,14 +1773,14 @@ async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("confirm_del_", ""))
     success = delete_ad_by_id(ad_id)
     if success:
-        await callback.message.edit_text("✅ Объявление удалено.", reply_markup=get_main_keyboard())
+        await callback.message.edit_text("✅ Объявление удалено.")
     else:
-        await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).", reply_markup=get_main_keyboard())
+        await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).")
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "cancel_del")
 async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("❌ Удаление отменено.", reply_markup=get_main_keyboard())
+    await callback.message.edit_text("❌ Удаление отменено.")
     await callback.answer()
 
 # --- Команда /favorites ---
