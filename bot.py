@@ -1407,7 +1407,7 @@ async def show_category_ads(callback: types.CallbackQuery):
         return
     await callback.message.answer(f"📂 Объявления в категории «{category}»:")
     for row in rows:
-        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[5]}"
+        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[6]}"
         if row[5]:
             await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
         else:
