@@ -849,10 +849,11 @@ async def show_category_ads(callback: types.CallbackQuery):
     await callback.answer()
 
 # --- Логирование всех callback-запросов ---
-@dp.callback_query()
-async def log_all_callbacks(callback: types.CallbackQuery):
-    logging.warning(f"Unhandled callback: {callback.data} from user {callback.from_user.id}")
-    await callback.answer()  # чтобы кнопка не "висела" в нажатом состоянии
+# Закомментировано, чтобы не перехватывать callback-запросы для edit_ и del_
+# @dp.callback_query()
+# async def log_all_callbacks(callback: types.CallbackQuery):
+#     logging.warning(f"Unhandled callback: {callback.data} from user {callback.from_user.id}")
+#     await callback.answer()  # чтобы кнопка не "висела" в нажатом состоянии
 
 # --- Состояния FSM для редактирования ---
 class EditAd(StatesGroup):
