@@ -1610,6 +1610,151 @@ async def edit_photo_skip(message: types.Message, state: FSMContext):
     await message.answer("✅ Фото оставлено без изменений.", reply_markup=get_main_keyboard())
     await state.clear()
 
+# --- Редактирование ---
+# --- Редактирование: выбор поля (должны быть выше общего обработчика) ---
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_title')
+async def edit_title_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новое название товара:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_title)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_description')
+async def edit_description_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новое описание:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_description)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_price')
+async def edit_price_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Введите новую цену (только число):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_price)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_category')
+async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    for cat in CATEGORIES:
+        builder.button(text=cat, callback_data=f"editcat_{cat}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите новую категорию:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_category)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_photo')
+async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditAd.editing_photo)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_cancel')
+async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("edit_") and c.data.replace("edit_", "").isdigit() and len(c.data.split('_')) == 2)
+async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
+    ad_id = int(callback.data.replace("edit_", ""))
+    ad_data = get_ad_by_id(ad_id)
+    if not ad_data:
+        await callback.answer("❌ Объявление не найдено.")
+        return
+    if ad_data['user_id'] != callback.from_user.id:
+        await callback.answer("❌ Это не ваше объявление.")
+        return
+    await state.clear()
+    await state.update_data(edit_ad_id=ad_id, edit_ad_data=ad_data)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📝 Название", callback_data="edit_title")
+    builder.button(text="📄 Описание", callback_data="edit_description")
+    builder.button(text="💰 Цена", callback_data="edit_price")
+    builder.button(text="🏷️ Категория", callback_data="edit_category")
+    builder.button(text="🖼️ Фото", callback_data="edit_photo")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Что вы хотите изменить?", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.choosing_field)
+    await callback.answer()
+
+@dp.message(EditAd.editing_title)
+async def edit_title_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'title', message.text)
+    if success:
+        await message.answer("✅ Название обновлено!", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+
+@dp.message(EditAd.editing_description)
+async def edit_description_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'description', message.text)
+    if success:
+        await message.answer("✅ Описание обновлено!", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+
+@dp.message(EditAd.editing_price)
+async def edit_price_finish(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Пожалуйста, введите цену числом.")
+        return
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'price', int(message.text))
+    if success:
+        await message.answer("✅ Цена обновлена!", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+
+@dp.callback_query(EditAd.editing_category, lambda c: c.data and c.data.startswith("editcat_"))
+async def edit_category_finish(callback: types.CallbackQuery, state: FSMContext):
+    category = callback.data.replace("editcat_", "")
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'category', category)
+    if success:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("✅ Категория обновлена!", reply_markup=get_main_keyboard())
+    else:
+        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+    await callback.answer()
+
+@dp.message(EditAd.editing_photo)
+async def edit_photo_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    photo_id = message.photo[-1].file_id if message.photo else None
+    if photo_id:
+        success = update_ad_photo(ad_id, photo_id)
+        if success:
+            await message.answer("✅ Фото обновлено!", reply_markup=get_main_keyboard())
+        else:
+            await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("❌ Фото не распознано. Попробуйте ещё раз или отправьте /skip.")
+        return
+    await state.clear()
+
+@dp.message(EditAd.editing_photo, Command('skip'))
+async def edit_photo_skip(message: types.Message, state: FSMContext):
+    await message.answer("✅ Фото оставлено без изменений.", reply_markup=get_main_keyboard())
+    await state.clear()
+
 # --- Удаление ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("del_"))
 async def process_delete(callback: types.CallbackQuery, state: FSMContext):
