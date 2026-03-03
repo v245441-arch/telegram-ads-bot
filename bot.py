@@ -1174,6 +1174,9 @@ async def add_price(message: types.Message, state: FSMContext):
         await message.answer("Пожалуйста, введите цену числом.")
         return
     await state.update_data(price=int(message.text))
+    # Логируем данные после сохранения цены
+    data = await state.get_data()
+    logging.info(f"Data after price: {data}")
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
         builder.button(text=cat, callback_data=f"cat_{cat}")
@@ -1228,6 +1231,13 @@ async def choose_district(callback: types.CallbackQuery, state: FSMContext):
 async def add_photo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     logging.info(f"Data in add_photo: {data}")
+    
+    # Проверяем наличие обязательных ключей
+    if 'title' not in data or 'description' not in data or 'price' not in data:
+        await message.answer("❌ Ошибка: данные объявления потеряны. Пожалуйста, начните добавление заново с /add")
+        await state.clear()
+        return
+    
     photo_id = message.photo[-1].file_id if message.photo else None
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
     is_clean = await moderate_with_deepseek(full_text)
