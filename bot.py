@@ -807,7 +807,11 @@ async def process_complaint(callback: types.CallbackQuery, state: FSMContext):
         ad_id = int(callback.data.replace('complaint_', ''))
         # Пока просто логируем и уведомляем пользователя
         logging.info(f"Complaint on ad {ad_id} from user {callback.from_user.id}")
-        await callback.answer("Функция жалоб находится в разработке. Скоро она заработает!", show_alert=True)
+        await callback.answer("⚠️ Жалоба отправлена администратору")
+        
+        # Отправляем уведомление админу (асинхронно)
+        complaint_id = await add_complaint(ad_id, callback.from_user.id, "⚠️ Жалоба отправлена администратору")
+        
     except ValueError:
         await callback.answer("Ошибка обработки жалобы", show_alert=True)
 
@@ -816,15 +820,26 @@ async def process_complaint(callback: types.CallbackQuery, state: FSMContext):
 async def process_favorite_add(callback: types.CallbackQuery, state: FSMContext):
     try:
         ad_id = int(callback.data.replace('fav_add_', ''))
-        # Пока просто логируем
-        logging.info(f"Favorite add for ad {ad_id} from user {callback.from_user.id}")
-        await callback.answer("✅ Добавлено в избранное (функция в разработке)", show_alert=True)
+        user_id = callback.from_user.id
+        
+        # Проверяем, уже ли в избранном
+        if is_favorite(user_id, ad_id):
+            await callback.answer("✅ Уже в избранном")
+            return
+        
+        # Добавляем в избранное
+        success = add_favorite(user_id, ad_id)
+        if success:
+            await callback.answer("⭐ Добавлено в избранное", show_alert=True)
+        else:
+            await callback.answer("✅ Уже в избранном")
     except ValueError:
         await callback.answer("Ошибка добавления в избранное", show_alert=True)
 
 # --- Обработчик для show_ (просмотр категорий) ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category_ads(callback: types.CallbackQuery):
+    await callback.answer()
     category = callback.data.replace("show_", "")
     logging.info(f"Просмотр категории: {category}")
     conn = sqlite3.connect(DB_PATH)
@@ -837,7 +852,6 @@ async def show_category_ads(callback: types.CallbackQuery):
     conn.close()
     if not rows:
         await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
-        await callback.answer()
         return
     await callback.message.answer(f"📂 Объявления в категории «{category}»:")
     for row in rows:
@@ -846,7 +860,6 @@ async def show_category_ads(callback: types.CallbackQuery):
             await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
         else:
             await callback.message.answer(text, parse_mode='HTML')
-    await callback.answer()
 
 # --- Логирование всех callback-запросов ---
 # Удалено, чтобы не перехватывать callback-запросы для edit_ и del_
