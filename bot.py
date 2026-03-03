@@ -11,31 +11,40 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import openai
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv():
+        return None
+
 load_dotenv()
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
-# --- Переменные окружения (обязательно задать на Railway) ---
+# --- Переменные окружения (prod settings optional) ---
+# Use env or sensible defaults for tests/local runs
 API_TOKEN = os.getenv('BOT_TOKEN')
 if not API_TOKEN:
-    raise ValueError("BOT_TOKEN не задан!")
+    logging.warning('BOT_TOKEN не задан — запускаем в тестовом/локальном режиме')
 
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
-if not DEEPSEEK_API_KEY:
-    raise ValueError("DEEPSEEK_API_KEY не задан!")
+if DEEPSEEK_API_KEY:
+    openai.api_key = DEEPSEEK_API_KEY
+    openai.base_url = "https://api.deepseek.com/v1/"
+else:
+    logging.warning('DEEPSEEK_API_KEY не задан — OpenAI/DeepSeek функции отключены')
+    openai.api_key = None
 
 ADMIN_ID = os.getenv('ADMIN_ID')
 if not ADMIN_ID:
-    raise ValueError("ADMIN_ID не задан! Укажите ID администратора.")
-ADMIN_ID = int(ADMIN_ID)
+    logging.warning('ADMIN_ID не задан — используем тестовый ADMIN_ID=123456789')
+    ADMIN_ID = 123456789
+else:
+    ADMIN_ID = int(ADMIN_ID)
 
-# --- Настройка DeepSeek (совместим с OpenAI) ---
-openai.api_key = DEEPSEEK_API_KEY
-openai.base_url = "https://api.deepseek.com/v1/"
-
-bot = Bot(token=API_TOKEN)
+# Создаём объект бота только если указан токен (в тестах обычно не нужен)
+bot = Bot(token=API_TOKEN) if API_TOKEN else None
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -605,14 +614,15 @@ async def moderate_with_deepseek(text: str) -> bool:
 
 # --- Клавиатуры ---
 def get_main_keyboard():
-    """Главное меню с кнопками команд."""
+    """Главное меню с кнопками команд.""" 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📋 Список объявлений")],
             [KeyboardButton(text="➕ Добавить объявление")],
             [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
             [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
-            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")]
+            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="📞 Поддержка")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -662,9 +672,84 @@ class EditAd(StatesGroup):
 class SearchState(StatesGroup):
     waiting_for_query = State()
 
+# --- Состояния для поддержки ---
+class Support(StatesGroup):
+    waiting_for_message = State()   # пользователь пишет сообщение админу
+    admin_waiting_for_reply = State() # админ пишет ответ пользователю
+
+# --- Команда /support ---
+@dp.message(Command('support'))
+async def cmd_support(message: types.Message, state: FSMContext):
+    await state.set_state(Support.waiting_for_message)
+    await message.answer(
+        "📝 Опишите вашу проблему или вопрос. Администратор ответит вам в ближайшее время.\n"
+        "Чтобы отменить, отправьте /cancel",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True,
+            one_time_keyboard=False
+        )
+    )
+
+@dp.message(lambda message: message.text == "📞 Поддержка")
+async def handle_support_button(message: types.Message, state: FSMContext):
+    await cmd_support(message, state)
+
+@dp.message(Support.waiting_for_message)
+async def process_support_message(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    username = message.from_user.username or "NoUsername"
+    text = message.text
+    admin_text = f"📨 Новое обращение от @{username} (id: {user_id}):\n\n{text}"
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"reply_to_{user_id}")]
+        ]
+    )
+    await bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
+    await message.answer("✅ Ваше сообщение отправлено администратору. Ожидайте ответа.", reply_markup=get_main_keyboard())
+    await state.clear()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith('reply_to_'))
+async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
+    user_id = int(callback.data.replace('reply_to_', ''))
+    await state.update_data(reply_to_user=user_id)
+    await state.set_state(Support.admin_waiting_for_reply)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("✏️ Введите ответ пользователю. Отправьте /cancel для отмены.")
+    await callback.answer()
+
+@dp.message(Support.admin_waiting_for_reply)
+async def admin_reply_finish(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = data.get('reply_to_user')
+    if not user_id:
+        await message.answer("❌ Ошибка: не удалось определить получателя.", reply_markup=get_main_keyboard())
+        await state.clear()
+        return
+    
+    reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
+    try:
+        await bot.send_message(user_id, reply_text, parse_mode='HTML')
+        await message.answer("✅ Ответ отправлен пользователю.", reply_markup=get_main_keyboard())
+    except Exception as e:
+        await message.answer(f"❌ Не удалось отправить ответ: {e}", reply_markup=get_main_keyboard())
+    await state.clear()
+
+@dp.message(Command('cancel'))
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is None:
+        await message.answer("❌ Нечего отменять.", reply_markup=get_main_keyboard())
+        return
+    
+    await state.clear()
+    await message.answer("❌ Действие отменено.", reply_markup=get_main_keyboard())
+
 # --- Команда /start ---
 @dp.message(Command('start'))
 async def cmd_start(message: types.Message, state: FSMContext):
+    logging.info(f"Вызвана команда {message.text} от {message.from_user.id}")
     await state.clear()
     await message.answer(
         "👋 Добро пожаловать в доску объявлений!\n"
@@ -890,6 +975,7 @@ async def process_search_query(message: types.Message, state: FSMContext):
 # --- Добавление объявления с AI-модерацией ---
 @dp.message(Command('add'))
 async def cmd_add(message: types.Message, state: FSMContext):
+    logging.info(f"Вызвана команда {message.text} от {message.from_user.id}")
     await state.clear()
     await message.answer("Введите название товара:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AddAd.title)
@@ -1082,6 +1168,7 @@ async def show_district_ads(callback: types.CallbackQuery):
 # --- Команда /list (все объявления) ---
 @dp.message(Command('list'))
 async def cmd_list(message: types.Message, state: FSMContext):
+    logging.info(f"Command /list from user {message.from_user.id}")
     await state.clear()
     ads = get_all_ads()
     if not ads:
@@ -1102,6 +1189,7 @@ async def cmd_list(message: types.Message, state: FSMContext):
 # --- Команда /categories ---
 @dp.message(Command('categories'))
 async def cmd_categories(message: types.Message, state: FSMContext):
+    logging.info(f"Command /categories from user {message.from_user.id}")
     await state.clear()
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
@@ -1156,6 +1244,7 @@ async def show_category(callback: types.CallbackQuery):
 # --- Команда /myads (личный кабинет) ---
 @dp.message(Command('myads'))
 async def cmd_myads(message: types.Message, state: FSMContext):
+    logging.info(f"Command /myads from user {message.from_user.id}")
     await state.clear()
     user_ads = get_user_ads(message.from_user.id)
     if not user_ads:
@@ -1356,6 +1445,7 @@ async def cancel_delete(callback: types.CallbackQuery, state: FSMContext):
 # --- Команда /favorites ---
 @dp.message(Command('favorites'))
 async def cmd_favorites(message: types.Message, state: FSMContext):
+    logging.info(f"Command /favorites from user {message.from_user.id}")
     await state.clear()
     favorites = get_user_favorites(message.from_user.id)
     if not favorites:
@@ -1376,6 +1466,7 @@ async def cmd_favorites(message: types.Message, state: FSMContext):
 # --- Команда /mysubs ---
 @dp.message(Command('mysubs'))
 async def cmd_mysubs(message: types.Message, state: FSMContext):
+    logging.info(f"Command /mysubs from user {message.from_user.id}")
     await state.clear()
     subscriptions = get_user_subscriptions(message.from_user.id)
     if not subscriptions:
