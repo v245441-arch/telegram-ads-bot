@@ -645,17 +645,21 @@ async def moderate_with_deepseek(text: str) -> bool:
         return False
 
 # --- Клавиатуры ---
-def get_main_keyboard():
+def get_main_keyboard(user_id=None):
     """Главное меню с кнопками команд.""" 
+    keyboard_buttons = [
+        [KeyboardButton(text="📋 Список объявлений")],
+        [KeyboardButton(text="➕ Добавить объявление")],
+        [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
+        [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
+        [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📞 Поддержка")]
+    ]
+    # Добавляем кнопку статистики только для администратора
+    if user_id == ADMIN_ID:
+        keyboard_buttons.insert(-1, [KeyboardButton(text="📊 Статистика")])
+    
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📋 Список объявлений")],
-            [KeyboardButton(text="➕ Добавить объявление")],
-            [KeyboardButton(text="📁 Категории"), KeyboardButton(text="👤 Мои объявления")],
-            [KeyboardButton(text="🔍 Поиск"), KeyboardButton(text="⭐ Избранное")],
-            [KeyboardButton(text="🔔 Мои подписки"), KeyboardButton(text="📊 Статистика")],
-            [KeyboardButton(text="📞 Поддержка")]
-        ],
+        keyboard=keyboard_buttons,
         resize_keyboard=True,
         one_time_keyboard=False
     )
@@ -945,11 +949,11 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
 async def cmd_cancel(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state is None:
-        await message.answer("❌ Нечего отменять.", reply_markup=get_main_keyboard())
+        await message.answer("❌ Нечего отменять.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     
     await state.clear()
-    await message.answer("❌ Действие отменено.", reply_markup=get_main_keyboard())
+    await message.answer("❌ Действие отменено.", reply_markup=get_main_keyboard(message.from_user.id))
 
 # --- Команда /start ---
 @dp.message(Command('start'))
@@ -966,7 +970,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "/myads — мои объявления\n"
         "/search — поиск\n"
         "/support — помощь",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(message.from_user.id)
     )
     if message.from_user.id == ADMIN_ID:
         await message.answer("🔧 Вы администратор. Статистика доступна.")
@@ -975,7 +979,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 @dp.message(Command('stats'))
 async def cmd_stats(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Эта команда только для администратора.", reply_markup=get_main_keyboard())
+        await message.answer("⛔ Эта команда только для администратора.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     await state.clear()
     stats = get_stats()
@@ -988,7 +992,7 @@ async def cmd_stats(message: types.Message, state: FSMContext):
     text += "\n<b>Последние 5 объявлений:</b>\n"
     for ad_id, title, price, username in stats['last_ads']:
         text += f"  • {title} — {price} руб. (от @{username})\n"
-    await message.answer(text, parse_mode='HTML', reply_markup=get_main_keyboard())
+    await message.answer(text, parse_mode='HTML', reply_markup=get_main_keyboard(message.from_user.id))
 
 # --- Команда /search ---
 @dp.message(Command('search'))
@@ -1008,9 +1012,9 @@ async def cmd_exit(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state == SearchState.waiting_for_query:
         await state.clear()
-        await message.answer("🚪 Вы вышли из режима поиска.", reply_markup=get_main_keyboard())
+        await message.answer("🚪 Вы вышли из режима поиска.", reply_markup=get_main_keyboard(message.from_user.id))
     else:
-        await message.answer("❓ Вы не в режиме поиска.", reply_markup=get_main_keyboard())
+        await message.answer("❓ Вы не в режиме поиска.", reply_markup=get_main_keyboard(message.from_user.id))
 
 # --- Обработчики кнопок главного меню ---
 @dp.message(lambda message: message.text == "📋 Список объявлений")
@@ -1018,7 +1022,7 @@ async def handle_list_button(message: types.Message, state: FSMContext):
     await state.clear()
     ads = get_all_ads()
     if not ads:
-        await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard())
+        await message.answer("📭 Пока нет объявлений.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     for ad in ads:
         text = format_ad_text(ad)
@@ -1027,7 +1031,7 @@ async def handle_list_button(message: types.Message, state: FSMContext):
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
-    await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard())
+    await message.answer("🔍 Что ищем дальше?", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(lambda message: message.text == "➕ Добавить объявление")
 async def handle_add_button(message: types.Message, state: FSMContext):
@@ -1054,7 +1058,7 @@ async def handle_myads_button(message: types.Message, state: FSMContext):
     await state.clear()
     user_ads = get_user_ads(message.from_user.id)
     if not user_ads:
-        await message.answer("📭 У вас пока нет объявлений.", reply_markup=get_main_keyboard())
+        await message.answer("📭 У вас пока нет объявлений.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     for ad in user_ads:
         text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
@@ -1072,7 +1076,7 @@ async def handle_myads_button(message: types.Message, state: FSMContext):
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=kb)
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=kb)
-    await message.answer("Вот ваши объявления", reply_markup=get_main_keyboard())
+    await message.answer("Вот ваши объявления", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(lambda message: message.text == "🔍 Поиск")
 async def handle_search_button(message: types.Message, state: FSMContext):
@@ -1090,7 +1094,7 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
     await state.clear()
     favorites = get_user_favorites(message.from_user.id)
     if not favorites:
-        await message.answer("⭐ У вас пока нет избранных объявлений.", reply_markup=get_main_keyboard())
+        await message.answer("⭐ У вас пока нет избранных объявлений.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     await message.answer("⭐ Ваши избранные объявления:")
     for ad in favorites:
@@ -1102,14 +1106,14 @@ async def handle_favorites_button(message: types.Message, state: FSMContext):
             await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
             await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
-    await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard())
+    await message.answer("Вот ваши избранные объявления", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(lambda message: message.text == "🔔 Мои подписки")
 async def handle_mysubs_button(message: types.Message, state: FSMContext):
     await state.clear()
     subscriptions = get_user_subscriptions(message.from_user.id)
     if not subscriptions:
-        await message.answer("🔔 Вы пока не подписаны ни на одну категорию.", reply_markup=get_main_keyboard())
+        await message.answer("🔔 Вы пока не подписаны ни на одну категорию.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     
     text = "🔔 <b>Ваши подписки:</b>\n\n"
@@ -1433,27 +1437,21 @@ async def cmd_categories(message: types.Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category_ads(callback: types.CallbackQuery):
+    await callback.answer()
     category = callback.data.replace("show_", "")
     logging.info(f"Просмотр категории: {category}")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC",
-        (category,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    if not rows:
+    ads = get_ads_by_category(category)
+    if not ads:
         await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
-        await callback.answer()
         return
     await callback.message.answer(f"📂 Объявления в категории «{category}»:")
-    for row in rows:
-        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[6]}"
-        if row[5]:
-            await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
+    for ad in ads:
+        text = format_ad_text(ad)
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
+        if ad['photo']:
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
-            await callback.message.answer(text, parse_mode='HTML')
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await callback.answer()
 
 # --- Команда /myads (личный кабинет) ---
