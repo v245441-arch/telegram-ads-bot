@@ -783,6 +783,45 @@ async def process_condition(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     logging.info(f"Condition selected: {condition}, moving to district")
 
+# --- Обработчики выбора района ---
+@dp.callback_query(lambda c: c.data and c.data.startswith('district_'))
+async def process_district(callback: types.CallbackQuery, state: FSMContext):
+    try:
+        parts = callback.data.split('_')
+        idx = int(parts[1])
+        district = YAKUTSK_DISTRICTS[idx]
+        await state.update_data(district=district)
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("Отправьте фото товара (или /skip):")
+        await state.set_state(AddAd.photo)
+        await callback.answer()
+        logging.info(f"District selected: {district}, moving to photo")
+    except (IndexError, ValueError) as e:
+        logging.error(f"Error parsing district callback: {callback.data}, error: {e}")
+        await callback.answer("Ошибка выбора района", show_alert=True)
+
+# --- Обработчики жалобы ---
+@dp.callback_query(lambda c: c.data and c.data.startswith('complaint_'))
+async def process_complaint(callback: types.CallbackQuery, state: FSMContext):
+    try:
+        ad_id = int(callback.data.replace('complaint_', ''))
+        # Пока просто логируем и уведомляем пользователя
+        logging.info(f"Complaint on ad {ad_id} from user {callback.from_user.id}")
+        await callback.answer("Функция жалоб находится в разработке. Скоро она заработает!", show_alert=True)
+    except ValueError:
+        await callback.answer("Ошибка обработки жалобы", show_alert=True)
+
+# --- Обработчики избранного ---
+@dp.callback_query(lambda c: c.data and c.data.startswith('fav_add_'))
+async def process_favorite_add(callback: types.CallbackQuery, state: FSMContext):
+    try:
+        ad_id = int(callback.data.replace('fav_add_', ''))
+        # Пока просто логируем
+        logging.info(f"Favorite add for ad {ad_id} from user {callback.from_user.id}")
+        await callback.answer("✅ Добавлено в избранное (функция в разработке)", show_alert=True)
+    except ValueError:
+        await callback.answer("Ошибка добавления в избранное", show_alert=True)
+
 # --- Логирование всех callback-запросов ---
 @dp.callback_query()
 async def log_all_callbacks(callback: types.CallbackQuery):
