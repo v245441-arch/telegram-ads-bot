@@ -822,6 +822,32 @@ async def process_favorite_add(callback: types.CallbackQuery, state: FSMContext)
     except ValueError:
         await callback.answer("Ошибка добавления в избранное", show_alert=True)
 
+# --- Обработчик для show_ (просмотр категорий) ---
+@dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
+async def show_category_ads(callback: types.CallbackQuery):
+    category = callback.data.replace("show_", "")
+    logging.info(f"Просмотр категории: {category}")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC",
+        (category,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    if not rows:
+        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
+        await callback.answer()
+        return
+    await callback.message.answer(f"📂 Объявления в категории «{category}»:")
+    for row in rows:
+        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[6]}"
+        if row[5]:
+            await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
+        else:
+            await callback.message.answer(text, parse_mode='HTML')
+    await callback.answer()
+
 # --- Логирование всех callback-запросов ---
 @dp.callback_query()
 async def log_all_callbacks(callback: types.CallbackQuery):
