@@ -716,57 +716,72 @@ class AddAd(StatesGroup):
     district = State()
     photo = State()
 
-# --- Обработчики выбора возрастной группы ---
-@dp.callback_query(AddAd.age_group)
-async def choose_age_group(callback: types.CallbackQuery, state: FSMContext):
-    age_group = callback.data.replace("age_", "")
-    await state.update_data(age_group=age_group)
+# --- Обработчики выбора категории ---
+@dp.callback_query(lambda c: c.data and c.data.startswith('cat_'))
+async def process_category(callback: types.CallbackQuery, state: FSMContext):
+    category = callback.data.replace('cat_', '')
+    await state.update_data(category=category)
     await callback.message.edit_reply_markup(reply_markup=None)
-    
-    # Показываем кнопки с выбором пола
+    # Показываем inline-кнопки для выбора возрастной группы
+    age_groups = ["0–3 мес", "3–12 мес", "1–3 года", "3–7 лет", "7–12 лет"]
     builder = InlineKeyboardBuilder()
-    builder.button(text="👶 Мальчик", callback_data="gender_boy")
-    builder.button(text="👧 Девочка", callback_data="gender_girl")
-    builder.button(text="🚻 Унисекс", callback_data="gender_unisex")
+    for age in age_groups:
+        builder.button(text=age, callback_data=f"age_{age}")
+    builder.adjust(1)
+    await callback.message.answer("Выберите возрастную группу:", reply_markup=builder.as_markup())
+    await state.set_state(AddAd.age_group)
+    await callback.answer()
+    logging.info(f"Category selected: {category}, moving to age group")
+
+# --- Обработчики выбора возрастной группы ---
+@dp.callback_query(lambda c: c.data and c.data.startswith('age_'))
+async def process_age(callback: types.CallbackQuery, state: FSMContext):
+    age = callback.data.replace('age_', '')
+    await state.update_data(age_group=age)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    # Показываем inline-кнопки для выбора пола
+    gender_options = ["👧 Девочка", "👦 Мальчик", "👪 Унисекс"]
+    builder = InlineKeyboardBuilder()
+    for gender in gender_options:
+        builder.button(text=gender, callback_data=f"gender_{gender}")
     builder.adjust(1)
     await callback.message.answer("Выберите пол:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.gender)
     await callback.answer()
+    logging.info(f"Age selected: {age}, moving to gender")
 
 # --- Обработчики выбора пола ---
-@dp.callback_query(AddAd.gender)
-async def choose_gender(callback: types.CallbackQuery, state: FSMContext):
-    gender = callback.data.replace("gender_", "")
+@dp.callback_query(lambda c: c.data and c.data.startswith('gender_'))
+async def process_gender(callback: types.CallbackQuery, state: FSMContext):
+    gender = callback.data.replace('gender_', '')
     await state.update_data(gender=gender)
     await callback.message.edit_reply_markup(reply_markup=None)
-    
-    # Показываем кнопки с выбором состояния
+    # Показываем inline-кнопки для выбора состояния
+    condition_options = ["🆕 Новое", "✨ Как новое", "🔄 Б/у", "🔧 Требует ремонта"]
     builder = InlineKeyboardBuilder()
-    builder.button(text="🆕 Новое", callback_data="condition_new")
-    builder.button(text="🔧 Б/у", callback_data="condition_used")
-    builder.button(text="⭐ Отличное", callback_data="condition_excellent")
-    builder.button(text="👍 Хорошее", callback_data="condition_good")
-    builder.button(text="🆗 Удовлетворительное", callback_data="condition_satisfactory")
+    for cond in condition_options:
+        builder.button(text=cond, callback_data=f"cond_{cond}")
     builder.adjust(1)
     await callback.message.answer("Выберите состояние:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.condition)
     await callback.answer()
+    logging.info(f"Gender selected: {gender}, moving to condition")
 
 # --- Обработчики выбора состояния ---
-@dp.callback_query(AddAd.condition)
-async def choose_condition(callback: types.CallbackQuery, state: FSMContext):
-    condition = callback.data.replace("condition_", "")
+@dp.callback_query(lambda c: c.data and c.data.startswith('cond_'))
+async def process_condition(callback: types.CallbackQuery, state: FSMContext):
+    condition = callback.data.replace('cond_', '')
     await state.update_data(condition=condition)
     await callback.message.edit_reply_markup(reply_markup=None)
-    
-    # Показываем кнопки с выбором района
+    # Переходим к выбору района (существующий шаг)
     builder = InlineKeyboardBuilder()
     for i, district in enumerate(YAKUTSK_DISTRICTS):
-        builder.button(text=district, callback_data=f"dist_{i}")
+        builder.button(text=district, callback_data=f"district_{i}")
     builder.adjust(1)
     await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
     await state.set_state(AddAd.district)
     await callback.answer()
+    logging.info(f"Condition selected: {condition}, moving to district")
 
 # --- Логирование всех callback-запросов ---
 @dp.callback_query()
