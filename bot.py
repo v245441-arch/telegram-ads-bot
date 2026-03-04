@@ -1052,18 +1052,8 @@ async def handle_add_button(message: types.Message, state: FSMContext):
     await state.set_state(AddAd.title)
 
 @dp.message(lambda message: message.text == "📁 Категории")
-async def handle_categories_button(message: types.Message, state: FSMContext):
-    await state.clear()
-    builder = InlineKeyboardBuilder()
-    for cat in CATEGORIES:
-        is_sub = is_subscribed(message.from_user.id, cat)
-        button_text = f"{cat} {'🔕' if is_sub else '🔔'}"
-        builder.button(text=button_text, callback_data=f"show_{cat}")
-    builder.adjust(1)
-    await message.answer(
-        "Выберите категорию для просмотра:\n🔔 - не подписаны, 🔕 - подписаны",
-        reply_markup=builder.as_markup()
-    )
+async def categories_button_handler(message: types.Message, state: FSMContext):
+    await cmd_categories(message, state)
 
 @dp.message(lambda message: message.text == "👤 Мои объявления")
 async def handle_myads_button(message: types.Message, state: FSMContext):
@@ -1911,16 +1901,9 @@ async def add_subscription_handler(callback: types.CallbackQuery):
     
     success = add_subscription(user_id, category)
     if success:
-        # Обновляем кнопку
-        new_button = InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")
-        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[[new_button]])
-        try:
-            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
-            await callback.answer("🔔 Вы подписались на категорию!")
-        except Exception as e:
-            await callback.answer("🔔 Вы подписались на категорию!")
+        await callback.answer("🔔 Вы подписались на категорию!", show_alert=True)
     else:
-        await callback.answer("⚠️ Вы уже подписаны на эту категорию")
+        await callback.answer("⚠️ Уже подписаны", show_alert=True)
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("sub_remove_"))
 async def remove_subscription_handler(callback: types.CallbackQuery):
@@ -1929,16 +1912,9 @@ async def remove_subscription_handler(callback: types.CallbackQuery):
     
     success = remove_subscription(user_id, category)
     if success:
-        # Обновляем кнопку
-        new_button = InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{category}")
-        new_keyboard = InlineKeyboardMarkup(inline_keyboard=[[new_button]])
-        try:
-            await callback.message.edit_reply_markup(reply_markup=new_keyboard)
-            await callback.answer("🔕 Вы отписались от категории!")
-        except Exception as e:
-            await callback.answer("🔕 Вы отписались от категории!")
+        await callback.answer("🔕 Вы отписались от категории!", show_alert=True)
     else:
-        await callback.answer("⚠️ Вы не были подписаны на эту категорию")
+        await callback.answer("⚠️ Вы не были подписаны на эту категорию", show_alert=True)
 
 # --- Обработчики жалоб ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("complaint_") and not c.data.startswith("complaint_reason_"))
