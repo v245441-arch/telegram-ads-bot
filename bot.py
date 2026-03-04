@@ -252,7 +252,7 @@ def search_ads(keyword):
         cursor = conn.cursor()
         pattern = f"%{keyword}%"
         cursor.execute("""
-            SELECT id, title, description, price, category, district, photo_id, username 
+            SELECT id, title, description, price, category, district, photo_id, username, age_group, gender, condition
             FROM ads 
             WHERE title LIKE ? OR description LIKE ? 
             ORDER BY id DESC
@@ -268,7 +268,10 @@ def search_ads(keyword):
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'username': row[7]
+                'username': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             })
         return ads
 
@@ -276,7 +279,7 @@ def get_user_ads(user_id):
     """Возвращает объявления конкретного пользователя."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, age_group, gender, condition FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -287,7 +290,10 @@ def get_user_ads(user_id):
                 'price': row[3],
                 'category': row[4],
                 'district': row[5],
-                'photo': row[6]
+                'photo': row[6],
+                'age_group': row[7],
+                'gender': row[8],
+                'condition': row[9]
             })
         return ads
 
@@ -295,7 +301,7 @@ def get_ad_by_id(ad_id):
     """Возвращает данные объявления по ID (для редактирования)."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, user_id FROM ads WHERE id = ?", (ad_id,))
+        cursor.execute("SELECT id, title, description, price, category, district, photo_id, user_id, age_group, gender, condition FROM ads WHERE id = ?", (ad_id,))
         row = cursor.fetchone()
         if row:
             return {
@@ -306,7 +312,10 @@ def get_ad_by_id(ad_id):
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'user_id': row[7]
+                'user_id': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             }
         return None
 
@@ -846,24 +855,18 @@ async def show_category_ads(callback: types.CallbackQuery):
     await callback.answer()
     category = callback.data.replace("show_", "")
     logging.info(f"Просмотр категории: {category}")
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT title, description, price, category, district, photo_id, username FROM ads WHERE category = ? ORDER BY id DESC",
-        (category,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    if not rows:
+    ads = get_ads_by_category(category)
+    if not ads:
         await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
         return
     await callback.message.answer(f"📂 Объявления в категории «{category}»:")
-    for row in rows:
-        text = f"<b>{row[0]}</b>\n{row[1]}\n💰 {row[2]} руб.\n📍 Район: {row[4]}\n👤 @{row[6]}"
-        if row[5]:
-            await callback.message.answer_photo(photo=row[5], caption=text, parse_mode='HTML')
+    for ad in ads:
+        text = format_ad_text(ad)
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
+        if ad['photo']:
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
-            await callback.message.answer(text, parse_mode='HTML')
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
 
 # --- Логирование всех callback-запросов ---
 # Удалено, чтобы не перехватывать callback-запросы для edit_ и del_
