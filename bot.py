@@ -279,7 +279,7 @@ def get_user_ads(user_id):
     """Возвращает объявления конкретного пользователя."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, description, price, category, district, photo_id, age_group, gender, condition FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        cursor.execute("SELECT id, title, description, price, category, district, age_group, gender, condition, photo_id, username FROM ads WHERE user_id = ? ORDER BY id DESC", (user_id,))
         rows = cursor.fetchall()
         ads = []
         for row in rows:
@@ -291,10 +291,11 @@ def get_user_ads(user_id):
                     'price': row[3],
                     'category': row[4],
                     'district': row[5],
-                    'photo': row[6],
-                    'age_group': row[7],
-                    'gender': row[8],
-                    'condition': row[9]
+                    'age_group': row[6],
+                    'gender': row[7],
+                    'condition': row[8],
+                    'photo': row[9],
+                    'username': row[10]
                 }
                 ads.append(ad)
             except Exception as e:
@@ -1073,7 +1074,7 @@ async def handle_myads_button(message: types.Message, state: FSMContext):
         return
     for ad in user_ads:
         info = f"Возраст: {ad.get('age_group', 'Не указан')} | Пол: {ad.get('gender', 'Не указан')} | Состояние: {ad.get('condition', 'Не указано')}"
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{info}\n{ad['description']}\n💰 {ad['price']} руб.\n📍 Район: {ad.get('district', 'Не указан')}\n👤 @{ad['username']}"
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{info}\n{ad['description']}\n💰 {ad['price']} руб.\n📍 Район: {ad.get('district', 'Не указан')}\n👤 @{ad.get('username', 'Не указан')}"
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
