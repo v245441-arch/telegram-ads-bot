@@ -1443,12 +1443,11 @@ async def cmd_categories(message: types.Message, state: FSMContext):
     await state.clear()
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
-        builder.row(
-            InlineKeyboardButton(text=cat, callback_data=f"show_{cat}"),
-            InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{cat}"),
-            InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{cat}")
-        )
-    await message.answer("Категории:", reply_markup=builder.as_markup())
+        builder.button(text=cat, callback_data=f"show_{cat}")
+        builder.button(text="🔔 Подписаться", callback_data=f"sub_add_{cat}")
+        builder.button(text="🔕 Отписаться", callback_data=f"sub_remove_{cat}")
+    builder.adjust(3)  # по три кнопки в ряд
+    await message.answer("Категории (нажмите для просмотра, подпишитесь или отпишитесь):", reply_markup=builder.as_markup())
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category_ads(callback: types.CallbackQuery):
