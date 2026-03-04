@@ -283,18 +283,23 @@ def get_user_ads(user_id):
         rows = cursor.fetchall()
         ads = []
         for row in rows:
-            ads.append({
-                'id': row[0],
-                'title': row[1],
-                'description': row[2],
-                'price': row[3],
-                'category': row[4],
-                'district': row[5],
-                'photo': row[6],
-                'age_group': row[7],
-                'gender': row[8],
-                'condition': row[9]
-            })
+            try:
+                ad = {
+                    'id': row[0],
+                    'title': row[1],
+                    'description': row[2],
+                    'price': row[3],
+                    'category': row[4],
+                    'district': row[5],
+                    'photo': row[6],
+                    'age_group': row[7],
+                    'gender': row[8],
+                    'condition': row[9]
+                }
+                ads.append(ad)
+            except Exception as e:
+                logging.error(f"Ошибка при обработке объявления: {e}")
+                continue
         return ads
 
 def get_ad_by_id(ad_id):
