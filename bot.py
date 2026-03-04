@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
@@ -143,6 +143,28 @@ def init_db():
             cursor.execute("ALTER TABLE ads ADD COLUMN condition TEXT")
         except sqlite3.OperationalError:
             pass  # поле уже существует
+        
+        # Добавляем поля для автоматического удаления
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN notif_1d INTEGER DEFAULT 0")   # 0 - false, 1 - true
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN notif_12h INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN notif_6h INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN notif_1h INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         # Таблица избранного
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
@@ -191,6 +213,156 @@ def add_ad_to_db(title, description, price, category, district, photo_id, user_i
         """, (title, description, price, category, district, photo_id, user_id, username, age_group, gender, condition))
         conn.commit()
         return cursor.lastrowid
+
+def extend_ad_expiration(ad_id):
+    """Продлевает объявление на 7 дней, сбрасывает флаги уведомлений."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE ads 
+            SET created_at = CURRENT_TIMESTAMP,
+                notif_1d = 0,
+                notif_12h = 0,
+                notif_6h = 0,
+                notif_1h = 0
+            WHERE id = ?
+        """, (ad_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def get_ads_needing_notifications():
+    """Возвращает объявления, которым нужно отправить уведомления."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        now = datetime.now()
+        
+        # 1 день (24 часа)
+        one_day_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(days=1)
+        # 12 часов
+        twelve_hours_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=12)
+        # 6 часов
+        six_hours_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=6)
+        # 1 час
+        one_hour_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=1)
+        
+        # 7 дней (для удаления)
+        seven_days_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(days=7)
+        
+        # Собираем объявления для уведомлений
+        ads_to_notify = []
+        
+        # 1 день
+        cursor.execute("""
+            SELECT id, title, user_id, username, created_at
+            FROM ads 
+            WHERE created_at <= ? AND notif_1d = 0
+        """, (one_day_ago,))
+        rows = cursor.fetchall()
+        for row in rows:
+            ads_to_notify.append({
+                'id': row[0],
+                'title': row[1],
+                'user_id': row[2],
+                'username': row[3],
+                'created_at': row[4],
+                'type': '1d'
+            })
+        
+        # 12 часов
+        cursor.execute("""
+            SELECT id, title, user_id, username, created_at
+            FROM ads 
+            WHERE created_at <= ? AND notif_12h = 0
+        """, (twelve_hours_ago,))
+        rows = cursor.fetchall()
+        for row in rows:
+            ads_to_notify.append({
+                'id': row[0],
+                'title': row[1],
+                'user_id': row[2],
+                'username': row[3],
+                'created_at': row[4],
+                'type': '12h'
+            })
+        
+        # 6 часов
+        cursor.execute("""
+            SELECT id, title, user_id, username, created_at
+            FROM ads 
+            WHERE created_at <= ? AND notif_6h = 0
+        """, (six_hours_ago,))
+        rows = cursor.fetchall()
+        for row in rows:
+            ads_to_notify.append({
+                'id': row[0],
+                'title': row[1],
+                'user_id': row[2],
+                'username': row[3],
+                'created_at': row[4],
+                'type': '6h'
+            })
+        
+        # 1 час
+        cursor.execute("""
+            SELECT id, title, user_id, username, created_at
+            FROM ads 
+            WHERE created_at <= ? AND notif_1h = 0
+        """, (one_hour_ago,))
+        rows = cursor.fetchall()
+        for row in rows:
+            ads_to_notify.append({
+                'id': row[0],
+                'title': row[1],
+                'user_id': row[2],
+                'username': row[3],
+                'created_at': row[4],
+                'type': '1h'
+            })
+        
+        # 7 дней (для удаления)
+        cursor.execute("""
+            SELECT id, title, user_id, username, created_at
+            FROM ads 
+            WHERE created_at <= ?
+        """, (seven_days_ago,))
+        rows = cursor.fetchall()
+        for row in rows:
+            ads_to_notify.append({
+                'id': row[0],
+                'title': row[1],
+                'user_id': row[2],
+                'username': row[3],
+                'created_at': row[4],
+                'type': '7d_delete'
+            })
+        
+        return ads_to_notify
+
+def mark_notification_sent(ad_id, notif_type):
+    """Отмечает, что уведомление отправлено."""
+    field_map = {
+        '1d': 'notif_1d',
+        '12h': 'notif_12h',
+        '6h': 'notif_6h',
+        '1h': 'notif_1h'
+    }
+    field = field_map.get(notif_type)
+    if not field:
+        return False
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE ads SET {field} = 1 WHERE id = ?", (ad_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def delete_ad_by_id(ad_id):
+    """Удаляет объявление по ID."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM ads WHERE id = ?", (ad_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
 def get_all_ads():
     with sqlite3.connect(DB_PATH) as conn:
@@ -1012,6 +1184,126 @@ async def cmd_start(message: types.Message, state: FSMContext):
     )
     if message.from_user.id == ADMIN_ID:
         await message.answer("🔧 Вы администратор. Статистика доступна.")
+
+# --- Команда /extend для продления объявления ---
+@dp.message(Command('extend'))
+async def cmd_extend(message: types.Message, state: FSMContext):
+    """Показывает список объявлений пользователя для продления."""
+    await state.clear()
+    user_ads = get_user_ads(message.from_user.id)
+    if not user_ads:
+        await message.answer("📭 У вас пока нет объявлений для продления.", reply_markup=get_main_keyboard())
+        return
+    
+    # Создаём inline-кнопки для выбора объявления
+    builder = InlineKeyboardBuilder()
+    for ad in user_ads:
+        title_preview = ad['title'][:30] + "..." if len(ad['title']) > 30 else ad['title']
+        builder.button(
+            text=f"{title_preview} — {ad['price']} руб.",
+            callback_data=f"extend_ad_{ad['id']}"
+        )
+    builder.adjust(1)
+    
+    await message.answer("Выберите объявление для продления на 7 дней:", reply_markup=builder.as_markup())
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("extend_ad_"))
+async def handle_extend_ad(callback: types.CallbackQuery):
+    """Обработчик выбора объявления для продления."""
+    ad_id = int(callback.data.replace("extend_ad_", ""))
+    ad_data = get_ad_by_id(ad_id)
+    
+    if not ad_data:
+        await callback.answer("❌ Объявление не найдено.")
+        return
+    
+    if ad_data['user_id'] != callback.from_user.id:
+        await callback.answer("❌ Это не ваше объявление.")
+        return
+    
+    # Продлеваем объявление
+    success = extend_ad_expiration(ad_id)
+    if success:
+        await callback.message.edit_text(
+            f"✅ Объявление «{ad_data['title']}» продлено на 7 дней.\n"
+            "Уведомления будут отправлены за 1 день, 12 часов, 6 часов и 1 час до удаления.",
+            reply_markup=None
+        )
+    else:
+        await callback.message.edit_text(
+            f"❌ Не удалось продлить объявление «{ad_data['title']}».",
+            reply_markup=None
+        )
+    
+    await callback.answer()
+
+# --- Функция для отправки уведомлений ---
+async def send_notification(ad, notif_type):
+    """Отправляет уведомление пользователю о скором удалении объявления."""
+    user_id = ad['user_id']
+    title = ad['title']
+    
+    # Текст уведомления в зависимости от типа
+    if notif_type == '1d':
+        text = (
+            f"⏰ Напоминание: ваше объявление «{title}» будет удалено через 1 день.\n"
+            f"Чтобы продлить его на 7 дней, отправьте команду /extend и выберите это объявление."
+        )
+    elif notif_type == '12h':
+        text = (
+            f"⏰ Напоминание: ваше объявление «{title}» будет удалено через 12 часов.\n"
+            f"Чтобы продлить его на 7 дней, отправьте команду /extend и выберите это объявление."
+        )
+    elif notif_type == '6h':
+        text = (
+            f"⏰ Напоминание: ваше объявление «{title}» будет удалено через 6 часов.\n"
+            f"Чтобы продлить его на 7 дней, отправьте команду /extend и выберите это объявление."
+        )
+    elif notif_type == '1h':
+        text = (
+            f"⏰ Напоминание: ваше объявление «{title}» будет удалено через 1 час.\n"
+            f"Чтобы продлить его на 7 дней, отправьте команду /extend и выберите это объявление."
+        )
+    else:
+        text = f"⏰ Напоминание: ваше объявление «{title}» будет удалено."
+    
+    try:
+        await bot.send_message(user_id, text, parse_mode='HTML')
+        logging.info(f"Уведомление {notif_type} отправлено пользователю {user_id} для объявления {ad['id']}")
+        return True
+    except Exception as e:
+        logging.error(f"Ошибка отправки уведомления {notif_type} пользователю {user_id}: {e}")
+        return False
+
+# --- Функция для автоматического удаления ---
+async def auto_delete_expired_ads():
+    """Проверяет и удаляет просроченные объявления, отправляет уведомления."""
+    ads_to_notify = get_ads_needing_notifications()
+    
+    for ad in ads_to_notify:
+        ad_id = ad['id']
+        notif_type = ad['type']
+        
+        if notif_type == '7d_delete':
+            # Удаляем объявление
+            success = delete_ad_by_id(ad_id)
+            if success:
+                # Отправляем уведомление автору
+                try:
+                    await bot.send_message(
+                        ad['user_id'],
+                        f"❌ Ваше объявление «{ad['title']}» удалено по истечении 7 дней.",
+                        parse_mode='HTML'
+                    )
+                    logging.info(f"Объявление {ad_id} удалено, уведомление отправлено автору {ad['user_id']}")
+                except Exception as e:
+                    logging.error(f"Ошибка отправки уведомления об удалении автору {ad['user_id']}: {e}")
+        else:
+            # Отправляем уведомление
+            sent = await send_notification(ad, notif_type)
+            if sent:
+                # Отмечаем, что уведомление отправлено
+                mark_notification_sent(ad_id, notif_type)
 
 # --- Команда /stats (только для админа) ---
 @dp.message(Command('stats'))
@@ -2424,7 +2716,22 @@ async def main():
     
     await bot_with_proxy.delete_webhook()
     logging.info("Webhook удалён, запускаем polling...")
+    
+    # Запускаем фоновую задачу для автоматического удаления
+    asyncio.create_task(auto_delete_expired_ads_loop())
+    
     await dp.start_polling(bot_with_proxy)
+
+# --- Фоновая задача для автоматического удаления ---
+async def auto_delete_expired_ads_loop():
+    """Фоновая задача, которая каждые 10 минут проверяет и удаляет просроченные объявления."""
+    while True:
+        try:
+            await auto_delete_expired_ads()
+        except Exception as e:
+            logging.error(f"Ошибка в фоновой задаче auto_delete_expired_ads_loop: {e}")
+        # Ждём 10 минут перед следующей проверкой
+        await asyncio.sleep(600)  # 600 секунд = 10 минут
 
 if __name__ == '__main__':
     asyncio.run(main())
