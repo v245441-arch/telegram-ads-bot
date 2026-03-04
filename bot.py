@@ -858,25 +858,6 @@ async def process_favorite_add(callback: types.CallbackQuery, state: FSMContext)
     except ValueError:
         await callback.answer("Ошибка добавления в избранное", show_alert=True)
 
-# --- Обработчик для show_ (просмотр категорий) ---
-@dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
-async def show_category_ads(callback: types.CallbackQuery):
-    await callback.answer()
-    category = callback.data.replace("show_", "")
-    logging.info(f"Просмотр категории: {category}")
-    ads = get_ads_by_category(category)
-    if not ads:
-        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
-        return
-    await callback.message.answer(f"📂 Объявления в категории «{category}»:")
-    for ad in ads:
-        text = format_ad_text(ad)
-        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
-        if ad['photo']:
-            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
-        else:
-            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
-
 # --- Логирование всех callback-запросов ---
 # Удалено, чтобы не перехватывать callback-запросы для edit_ и del_
 
@@ -974,14 +955,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "👋 Привет, мамочка! 👶\n"
-        "Это доска объявлений для мам и малышей. Здесь можно продать, купить, обменять детские вещи, найти няню или просто спросить совета.\n"
-        "Команды:\n"
-        "/add — добавить объявление\n"
-        "/list — показать все объявления\n"
-        "/categories — выбрать категорию\n"
-        "/myads — мои объявления\n"
-        "/search — поиск\n"
-        "/support — помощь",
+        "Это доска объявлений для мам и малышей. Здесь можно продать, купить, обменять детские вещи, найти няню или просто спросить совета.\n\n"
+        "Все функции доступны через кнопки в меню ниже.",
         reply_markup=get_main_keyboard(message.from_user.id)
     )
     if message.from_user.id == ADMIN_ID:
@@ -1441,20 +1416,8 @@ async def show_category_ads(callback: types.CallbackQuery):
     await callback.answer()
     category = callback.data.replace("show_", "")
     logging.info(f"Просмотр категории: {category}")
-    ads = get_ads_by_category(category)
-    if not ads:
-        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
-        return
-    await callback.message.answer(f"📂 Объявления в категории «{category}»:")
-    for ad in ads:
-        text = format_ad_text(ad)
-        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
-        if ad['photo']:
-            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
-        else:
-            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     
-    # Отправляем отдельное сообщение с информацией о категории и кнопками подписки
+    # ВСЕГДА отправляем кнопки подписки, независимо от того, есть ли объявления в категории
     is_subscribed_status = is_subscribed(callback.from_user.id, category)
     builder = InlineKeyboardBuilder()
     if is_subscribed_status:
@@ -1466,6 +1429,21 @@ async def show_category_ads(callback: types.CallbackQuery):
         f"Категория: {category}",
         reply_markup=builder.as_markup()
     )
+    
+    ads = get_ads_by_category(category)
+    
+    if not ads:
+        await callback.message.answer(f"В категории «{category}» пока нет объявлений.")
+        return
+    
+    await callback.message.answer(f"📂 Объявления в категории «{category}»:")
+    for ad in ads:
+        text = format_ad_text(ad)
+        keyboard = get_favorite_keyboard(callback.from_user.id, ad['id'])
+        if ad['photo']:
+            await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
+        else:
+            await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
     await callback.answer()
 
 # --- Команда /myads (личный кабинет) ---
