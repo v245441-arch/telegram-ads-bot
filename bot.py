@@ -949,7 +949,7 @@ async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("✏️ Введите ответ пользователю. Отправьте /cancel для отмены.")
     await callback.answer()
-    logging.info(f"Админ начал ответ пользователю {user_id} в чате {chat_id}")
+    logging.info(f"Admin reply start for user {user_id} in chat {chat_id}")
 
 @dp.message(Support.admin_waiting_for_reply)
 async def admin_reply_finish(message: types.Message, state: FSMContext):
@@ -968,11 +968,18 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
     
     logging.info(f"Админ отправил ответ в чате {message.chat.id}: {message.text}")
     
+    # Проверяем, что user_id не равен ADMIN_ID (чтобы не отправлять самому себе)
+    if user_id == ADMIN_ID:
+        await message.answer("⚠️ Нельзя отправить ответ самому себе.")
+        await state.clear()
+        return
+    
     # Отправляем ответ пользователю
     reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
     logging.info(f"Attempting to send reply to user {user_id}: {reply_text}")
+    logging.info(f"Reply content: {reply_text}")
     try:
-        await bot.send_message(user_id, reply_text, parse_mode='HTML')
+        await bot.send_message(user_id, reply_text)
         logging.info(f"Reply sent successfully to {user_id}")
         await message.answer("✅ Ответ отправлен пользователю.")
     except Exception as e:
