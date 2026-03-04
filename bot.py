@@ -944,6 +944,7 @@ async def process_support_message(message: types.Message, state: FSMContext):
 async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
     user_id = int(callback.data.replace('reply_to_', ''))
     chat_id = callback.message.chat.id
+    logging.info(f"Admin reply start: user_id={user_id}, admin_id={callback.from_user.id}")
     await state.update_data(reply_to_user=user_id, chat_id=chat_id)
     await state.set_state(Support.admin_waiting_for_reply)
     await callback.message.edit_reply_markup(reply_markup=None)
