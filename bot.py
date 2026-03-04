@@ -45,6 +45,13 @@ if not ADMIN_ID:
 else:
     ADMIN_ID = int(ADMIN_ID)
 
+CHAT_ID = os.getenv('CHAT_ID')
+if CHAT_ID:
+    CHAT_ID = int(CHAT_ID)
+    logging.info(f'CHAT_ID установлен: {CHAT_ID}')
+else:
+    logging.warning('CHAT_ID не задан — отправка в общий чат отключена')
+
 # Создаём объект бота только если указан токен (в тестах обычно не нужен)
 bot = Bot(token=API_TOKEN) if API_TOKEN else None
 storage = MemoryStorage()
@@ -1289,6 +1296,17 @@ async def add_photo(message: types.Message, state: FSMContext):
             author_user_id=message.from_user.id,
             photo_id=photo_id
         )
+        
+        # Отправляем в общий чат, если CHAT_ID задан
+        if CHAT_ID:
+            await send_to_public_chat(
+                title=data['title'],
+                description=data['description'],
+                price=data['price'],
+                username=message.from_user.username or "NoUsername",
+                district=data.get('district', '📍 Другой район'),
+                photo_id=photo_id
+            )
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
@@ -1324,6 +1342,17 @@ async def skip_photo(message: types.Message, state: FSMContext):
             author_user_id=message.from_user.id,
             photo_id=None
         )
+        
+        # Отправляем в общий чат, если CHAT_ID задан
+        if CHAT_ID:
+            await send_to_public_chat(
+                title=data['title'],
+                description=data['description'],
+                price=data['price'],
+                username=message.from_user.username or "NoUsername",
+                district=data.get('district', '📍 Другой район'),
+                photo_id=None
+            )
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
