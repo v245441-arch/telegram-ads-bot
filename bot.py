@@ -967,7 +967,8 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
     if message.chat.id != chat_id or message.from_user.id != ADMIN_ID:
         return
     
-    logging.info(f"Админ отправил ответ в чате {message.chat.id}: {message.text}")
+    logging.info(f"Admin reply finish: user_id={user_id}, admin_id={message.from_user.id}, chat_id={chat_id}")
+    logging.info(f"Reply content: {message.text}")
     
     # Проверяем, что user_id не равен ADMIN_ID (чтобы не отправлять самому себе)
     if user_id == ADMIN_ID:
@@ -977,8 +978,6 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
     
     # Отправляем ответ пользователю
     reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
-    logging.info(f"Attempting to send reply to user {user_id}: {reply_text}")
-    logging.info(f"Reply content: {reply_text}")
     try:
         sent_message = await bot.send_message(user_id, reply_text)
         logging.info(f"Reply sent, message_id={sent_message.message_id}")
