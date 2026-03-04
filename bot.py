@@ -1434,11 +1434,7 @@ async def cmd_categories(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     for cat in CATEGORIES:
         builder.row(InlineKeyboardButton(text=cat, callback_data=f"show_{cat}"))
-        builder.row(
-            InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{cat}"),
-            InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{cat}")
-        )
-    await message.answer("Категории (нажмите для просмотра, подпишитесь или отпишитесь):", reply_markup=builder.as_markup())
+    await message.answer("Выберите категорию для просмотра объявлений:", reply_markup=builder.as_markup())
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("show_"))
 async def show_category_ads(callback: types.CallbackQuery):
@@ -1457,6 +1453,19 @@ async def show_category_ads(callback: types.CallbackQuery):
             await callback.message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
         else:
             await callback.message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    
+    # Отправляем отдельное сообщение с информацией о категории и кнопками подписки
+    is_subscribed_status = is_subscribed(callback.from_user.id, category)
+    builder = InlineKeyboardBuilder()
+    if is_subscribed_status:
+        builder.button(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")
+    else:
+        builder.button(text="🔔 Подписаться", callback_data=f"sub_add_{category}")
+    
+    await callback.message.answer(
+        f"Категория: {category}",
+        reply_markup=builder.as_markup()
+    )
     await callback.answer()
 
 # --- Команда /myads (личный кабинет) ---
@@ -1902,9 +1911,14 @@ async def add_subscription_handler(callback: types.CallbackQuery):
     
     success = add_subscription(user_id, category)
     if success:
-        await callback.answer("🔔 Вы подписались на категорию!", show_alert=True)
+        # Обновляем кнопку на "Отписаться"
+        new_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔕 Отписаться", callback_data=f"sub_remove_{category}")]
+        ])
+        await callback.message.edit_reply_markup(reply_markup=new_kb)
+        await callback.answer("✅ Вы подписались на категорию")
     else:
-        await callback.answer("⚠️ Уже подписаны", show_alert=True)
+        await callback.answer("⚠️ Уже подписаны")
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("sub_remove_"))
 async def remove_subscription_handler(callback: types.CallbackQuery):
@@ -1913,9 +1927,14 @@ async def remove_subscription_handler(callback: types.CallbackQuery):
     
     success = remove_subscription(user_id, category)
     if success:
-        await callback.answer("🔕 Вы отписались от категории!", show_alert=True)
+        # Обновляем кнопку на "Подписаться"
+        new_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔔 Подписаться", callback_data=f"sub_add_{category}")]
+        ])
+        await callback.message.edit_reply_markup(reply_markup=new_kb)
+        await callback.answer("✅ Вы отписались от категории")
     else:
-        await callback.answer("⚠️ Вы не были подписаны на эту категорию", show_alert=True)
+        await callback.answer("⚠️ Вы не были подписаны на эту категорию")
 
 # --- Обработчики жалоб ---
 @dp.callback_query(lambda c: c.data and c.data.startswith("complaint_") and not c.data.startswith("complaint_reason_"))
