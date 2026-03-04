@@ -943,7 +943,7 @@ async def process_support_message(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data and c.data.startswith('reply_to_'))
 async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
     user_id = int(callback.data.replace('reply_to_', ''))
-    await state.update_data(reply_to_user=user_id)
+    await state.update_data(reply_to_user=user_id, support_chat_id=callback.message.chat.id)
     await state.set_state(Support.admin_waiting_for_reply)
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer("✏️ Введите ответ пользователю. Отправьте /cancel для отмены.")
@@ -953,17 +953,35 @@ async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
 async def admin_reply_finish(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user_id = data.get('reply_to_user')
+    support_chat_id = data.get('support_chat_id')
+    
     if not user_id:
         await message.answer("❌ Ошибка: не удалось определить получателя.", reply_markup=get_main_keyboard())
         await state.clear()
         return
     
-    reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
-    try:
-        await bot.send_message(user_id, reply_text, parse_mode='HTML')
-        await message.answer("✅ Ответ отправлен пользователю.", reply_markup=get_main_keyboard())
-    except Exception as e:
-        await message.answer(f"❌ Не удалось отправить ответ: {e}", reply_markup=get_main_keyboard())
+    # Проверяем, что сообщение пришло из чата поддержки
+    if message.chat.id == SUPPORT_CHAT_ID and support_chat_id == SUPPORT_CHAT_ID:
+        # Сообщение из чата поддержки - отправляем ответ пользователю
+        reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
+        try:
+            await bot.send_message(user_id, reply_text, parse_mode='HTML')
+            await message.answer("✅ Ответ отправлен пользователю.", reply_markup=get_main_keyboard())
+            logging.info(f"Ответ админа из чата поддержки отправлен пользователю {user_id}")
+        except Exception as e:
+            await message.answer(f"❌ Не удалось отправить ответ: {e}", reply_markup=get_main_keyboard())
+            logging.error(f"Ошибка отправки ответа из чата поддержки: {e}")
+    else:
+        # Сообщение из лички - стандартная логика
+        reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
+        try:
+            await bot.send_message(user_id, reply_text, parse_mode='HTML')
+            await message.answer("✅ Ответ отправлен пользователю.", reply_markup=get_main_keyboard())
+            logging.info(f"Ответ админа из лички отправлен пользователю {user_id}")
+        except Exception as e:
+            await message.answer(f"❌ Не удалось отправить ответ: {e}", reply_markup=get_main_keyboard())
+            logging.error(f"Ошибка отправки ответа из лички: {e}")
+    
     await state.clear()
 
 @dp.message(Command('cancel'))
