@@ -1183,6 +1183,12 @@ async def process_search_query(message: types.Message, state: FSMContext):
             text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб.\n👤 @{ad['username']}"
             if ad.get('district'):
                 text += f"\n📍 Район: {ad['district']}"
+            if ad.get('age_group'):
+                text += f"\n👶 Возраст: {ad['age_group']}"
+            if ad.get('gender'):
+                text += f"\n🚻 Пол: {ad['gender']}"
+            if ad.get('condition'):
+                text += f"\n📦 Состояние: {ad['condition']}"
             keyboard = get_favorite_keyboard(message.from_user.id, ad['id'])
             if ad['photo']:
                 await message.answer_photo(photo=ad['photo'], caption=text, parse_mode='HTML', reply_markup=keyboard)
