@@ -970,10 +970,11 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
     
     # Отправляем ответ пользователю
     reply_text = f"✉️ Ответ от администратора:\n\n{message.text}"
+    logging.info(f"Attempting to send reply to user {user_id}: {reply_text}")
     try:
         await bot.send_message(user_id, reply_text, parse_mode='HTML')
+        logging.info(f"Reply sent successfully to {user_id}")
         await message.answer("✅ Ответ отправлен пользователю.")
-        logging.info(f"Ответ отправлен пользователю {user_id}")
     except Exception as e:
         await message.answer(f"❌ Не удалось отправить ответ: {e}")
         logging.error(f"Ошибка отправки ответа: {e}")
