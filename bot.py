@@ -2354,10 +2354,18 @@ async def send_to_public_chat(title, description, price, username, district, pho
         f"📍 {district}"
     )
     
+    # Получаем username бота
+    try:
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username
+    except Exception as e:
+        logging.error(f"Ошибка получения username бота: {e}")
+        bot_username = "your_bot_username"
+    
     # Создаём кнопку-ссылку на бота
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🤖 Перейти в бот", url=f"https://t.me/{bot.me.username}" if bot.me else "https://t.me/your_bot_username")]
+            [InlineKeyboardButton(text="🤖 Перейти в бот", url=f"https://t.me/{bot_username}")]
         ]
     )
     
