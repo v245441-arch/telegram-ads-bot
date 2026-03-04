@@ -369,7 +369,7 @@ def get_user_favorites(user_id):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT a.id, a.title, a.description, a.price, a.category, a.district, a.photo_id, a.username
+            SELECT a.id, a.title, a.description, a.price, a.category, a.district, a.photo_id, a.username, a.age_group, a.gender, a.condition
             FROM ads a
             JOIN favorites f ON a.id = f.ad_id
             WHERE f.user_id = ?
@@ -386,7 +386,10 @@ def get_user_favorites(user_id):
                 'category': row[4],
                 'district': row[5],
                 'photo': row[6],
-                'username': row[7]
+                'username': row[7],
+                'age_group': row[8],
+                'gender': row[9],
+                'condition': row[10]
             })
         return ads
 
@@ -1064,9 +1067,8 @@ async def handle_myads_button(message: types.Message, state: FSMContext):
         await message.answer("📭 У вас пока нет объявлений.", reply_markup=get_main_keyboard(message.from_user.id))
         return
     for ad in user_ads:
-        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{ad['description']}\n💰 {ad['price']} руб."
-        if ad.get('district'):
-            text += f"\n📍 Район: {ad['district']}"
+        info = f"Возраст: {ad.get('age_group', 'Не указан')} | Пол: {ad.get('gender', 'Не указан')} | Состояние: {ad.get('condition', 'Не указано')}"
+        text = f"<b>{ad['title']}</b> [{ad['category']}]\n{info}\n{ad['description']}\n💰 {ad['price']} руб.\n📍 Район: {ad.get('district', 'Не указан')}\n👤 @{ad['username']}"
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
