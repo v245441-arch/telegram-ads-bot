@@ -979,7 +979,8 @@ async def admin_reply_finish(message: types.Message, state: FSMContext):
     logging.info(f"Attempting to send reply to user {user_id}: {reply_text}")
     logging.info(f"Reply content: {reply_text}")
     try:
-        await bot.send_message(user_id, reply_text)
+        sent_message = await bot.send_message(user_id, reply_text)
+        logging.info(f"Reply sent, message_id={sent_message.message_id}")
         logging.info(f"Reply sent successfully to {user_id}")
         await message.answer("✅ Ответ отправлен пользователю.")
     except Exception as e:
