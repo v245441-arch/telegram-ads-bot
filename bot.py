@@ -52,6 +52,13 @@ if CHAT_ID:
 else:
     logging.warning('CHAT_ID не задан — отправка в общий чат отключена')
 
+SUPPORT_CHAT_ID = os.getenv('SUPPORT_CHAT_ID')
+if SUPPORT_CHAT_ID:
+    SUPPORT_CHAT_ID = int(SUPPORT_CHAT_ID)
+    logging.info(f'SUPPORT_CHAT_ID установлен: {SUPPORT_CHAT_ID}')
+else:
+    logging.warning('SUPPORT_CHAT_ID не задан — используется старая логика поддержки')
+
 # Создаём объект бота только если указан токен (в тестах обычно не нужен)
 bot = Bot(token=API_TOKEN) if API_TOKEN else None
 storage = MemoryStorage()
@@ -909,14 +916,28 @@ async def process_support_message(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     username = message.from_user.username or "NoUsername"
     text = message.text
-    admin_text = f"📨 Новое обращение от @{username} (id: {user_id}):\n\n{text}"
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"reply_to_{user_id}")]
-        ]
-    )
-    await bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
-    await message.answer("✅ Ваше сообщение отправлено администратору. Ожидайте ответа.", reply_markup=get_main_keyboard())
+    
+    if SUPPORT_CHAT_ID:
+        # Отправляем сообщение в чат поддержки
+        support_text = f"📨 Новое обращение от @{username} (id: {user_id}):\n\n{text}"
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"reply_to_{user_id}")]
+            ]
+        )
+        await bot.send_message(SUPPORT_CHAT_ID, support_text, reply_markup=kb)
+        await message.answer("✅ Ваше сообщение отправлено в чат поддержки. Ожидайте ответа.", reply_markup=get_main_keyboard())
+    else:
+        # Старая логика - отправка админу
+        admin_text = f"📨 Новое обращение от @{username} (id: {user_id}):\n\n{text}"
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"reply_to_{user_id}")]
+            ]
+        )
+        await bot.send_message(ADMIN_ID, admin_text, reply_markup=kb)
+        await message.answer("✅ Ваше сообщение отправлено администратору. Ожидайте ответа.", reply_markup=get_main_keyboard())
+    
     await state.clear()
 
 @dp.callback_query(lambda c: c.data and c.data.startswith('reply_to_'))
@@ -2317,6 +2338,48 @@ async def notify_subscribers(category, title, description, price, username, auth
                 )
         except Exception as e:
             logging.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
+
+# --- Функция отправки в общий чат ---
+async def send_to_public_chat(title, description, price, username, district, photo_id=None):
+    """Отправляет сообщение о новом объявлении в общий чат."""
+    if not CHAT_ID:
+        return
+    
+    text = (
+        f"📢 Новое объявление:\n\n"
+        f"<b>{title}</b>\n"
+        f"{description}\n"
+        f"💰 {price} руб.\n"
+        f"👤 @{username}\n"
+        f"📍 {district}"
+    )
+    
+    # Создаём кнопку-ссылку на бота
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🤖 Перейти в бот", url=f"https://t.me/{bot.me.username}" if bot.me else "https://t.me/your_bot_username")]
+        ]
+    )
+    
+    try:
+        if photo_id:
+            await bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=photo_id,
+                caption=text,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+        else:
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=text,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+        logging.info(f"Сообщение о новом объявлении отправлено в чат {CHAT_ID}")
+    except Exception as e:
+        logging.error(f"Ошибка отправки сообщения в общий чат: {e}")
 
 # --- Запуск бота ---
 async def main():
