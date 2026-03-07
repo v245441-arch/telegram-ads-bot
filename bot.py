@@ -144,13 +144,13 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # поле уже существует
         
-        # Добавляем поля для автоматического удаления
+        # Добавляем поля для автоматического удаления, если их нет
         try:
             cursor.execute("ALTER TABLE ads ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         except sqlite3.OperationalError:
             pass
         try:
-            cursor.execute("ALTER TABLE ads ADD COLUMN notif_1d INTEGER DEFAULT 0")   # 0 - false, 1 - true
+            cursor.execute("ALTER TABLE ads ADD COLUMN notif_1d INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
         try:
@@ -165,6 +165,20 @@ def init_db():
             cursor.execute("ALTER TABLE ads ADD COLUMN notif_1h INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        # Добавляем поле для хранения ID сообщения в общем чате
+        try:
+            cursor.execute("ALTER TABLE ads ADD COLUMN public_chat_message_id INTEGER")
+        except sqlite3.OperationalError:
+            pass
+
+        # Проверяем наличие колонки created_at
+        cursor.execute("PRAGMA table_info(ads)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'created_at' not in columns:
+            cursor.execute("ALTER TABLE ads ADD COLUMN created_at TIMESTAMP")
+            logging.info("Колонка created_at добавлена")
+        # Теперь обновляем значения, если они NULL
+        cursor.execute("UPDATE ads SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
         # Таблица избранного
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
@@ -236,105 +250,63 @@ def get_ads_needing_notifications():
         cursor = conn.cursor()
         now = datetime.now()
         
-        # 1 день (24 часа)
-        one_day_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(days=1)
-        # 12 часов
-        twelve_hours_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=12)
-        # 6 часов
-        six_hours_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=6)
-        # 1 час
-        one_hour_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(hours=1)
+        # 7 дней назад
+        seven_days_ago = now - timedelta(days=7)
+        # 1 день до истечения (т.е. 6 дней после создания)
+        one_day_before = now - timedelta(days=6)
+        # 12 часов до истечения (6 дней и 12 часов после создания)
+        twelve_hours_before = now - timedelta(days=6, hours=12)
+        # 6 часов до истечения (6 дней и 18 часов после создания)
+        six_hours_before = now - timedelta(days=6, hours=18)
+        # 1 час до истечения (6 дней и 23 часа после создания)
+        one_hour_before = now - timedelta(days=6, hours=23)
         
-        # 7 дней (для удаления)
-        seven_days_ago = now.replace(hour=now.hour, minute=now.minute, second=0, microsecond=0) - timedelta(days=7)
-        
-        # Собираем объявления для уведомлений
         ads_to_notify = []
         
-        # 1 день
+        # Уведомление за 1 день (когда объявлению ровно 6 дней)
         cursor.execute("""
             SELECT id, title, user_id, username, created_at
             FROM ads 
             WHERE created_at <= ? AND notif_1d = 0
-        """, (one_day_ago,))
-        rows = cursor.fetchall()
-        for row in rows:
-            ads_to_notify.append({
-                'id': row[0],
-                'title': row[1],
-                'user_id': row[2],
-                'username': row[3],
-                'created_at': row[4],
-                'type': '1d'
-            })
+        """, (one_day_before,))
+        for row in cursor.fetchall():
+            ads_to_notify.append({'id': row[0], 'title': row[1], 'user_id': row[2], 'username': row[3], 'created_at': row[4], 'type': '1d'})
         
-        # 12 часов
+        # Уведомление за 12 часов (когда объявлению 6 дней 12 часов)
         cursor.execute("""
             SELECT id, title, user_id, username, created_at
             FROM ads 
             WHERE created_at <= ? AND notif_12h = 0
-        """, (twelve_hours_ago,))
-        rows = cursor.fetchall()
-        for row in rows:
-            ads_to_notify.append({
-                'id': row[0],
-                'title': row[1],
-                'user_id': row[2],
-                'username': row[3],
-                'created_at': row[4],
-                'type': '12h'
-            })
+        """, (twelve_hours_before,))
+        for row in cursor.fetchall():
+            ads_to_notify.append({'id': row[0], 'title': row[1], 'user_id': row[2], 'username': row[3], 'created_at': row[4], 'type': '12h'})
         
-        # 6 часов
+        # Уведомление за 6 часов (когда объявлению 6 дней 18 часов)
         cursor.execute("""
             SELECT id, title, user_id, username, created_at
             FROM ads 
             WHERE created_at <= ? AND notif_6h = 0
-        """, (six_hours_ago,))
-        rows = cursor.fetchall()
-        for row in rows:
-            ads_to_notify.append({
-                'id': row[0],
-                'title': row[1],
-                'user_id': row[2],
-                'username': row[3],
-                'created_at': row[4],
-                'type': '6h'
-            })
+        """, (six_hours_before,))
+        for row in cursor.fetchall():
+            ads_to_notify.append({'id': row[0], 'title': row[1], 'user_id': row[2], 'username': row[3], 'created_at': row[4], 'type': '6h'})
         
-        # 1 час
+        # Уведомление за 1 час (когда объявлению 6 дней 23 часа)
         cursor.execute("""
             SELECT id, title, user_id, username, created_at
             FROM ads 
             WHERE created_at <= ? AND notif_1h = 0
-        """, (one_hour_ago,))
-        rows = cursor.fetchall()
-        for row in rows:
-            ads_to_notify.append({
-                'id': row[0],
-                'title': row[1],
-                'user_id': row[2],
-                'username': row[3],
-                'created_at': row[4],
-                'type': '1h'
-            })
+        """, (one_hour_before,))
+        for row in cursor.fetchall():
+            ads_to_notify.append({'id': row[0], 'title': row[1], 'user_id': row[2], 'username': row[3], 'created_at': row[4], 'type': '1h'})
         
-        # 7 дней (для удаления)
+        # Удаление через 7 дней
         cursor.execute("""
             SELECT id, title, user_id, username, created_at
             FROM ads 
             WHERE created_at <= ?
         """, (seven_days_ago,))
-        rows = cursor.fetchall()
-        for row in rows:
-            ads_to_notify.append({
-                'id': row[0],
-                'title': row[1],
-                'user_id': row[2],
-                'username': row[3],
-                'created_at': row[4],
-                'type': '7d_delete'
-            })
+        for row in cursor.fetchall():
+            ads_to_notify.append({'id': row[0], 'title': row[1], 'user_id': row[2], 'username': row[3], 'created_at': row[4], 'type': '7d_delete'})
         
         return ads_to_notify
 
@@ -1054,6 +1026,10 @@ class EditAd(StatesGroup):
     editing_description = State()
     editing_price = State()
     editing_category = State()
+    editing_age_group = State()
+    editing_gender = State()
+    editing_condition = State()
+    editing_district = State()
     editing_photo = State()
 
 # --- Состояние для поиска ---
@@ -1607,7 +1583,7 @@ async def add_photo(message: types.Message, state: FSMContext):
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
     is_clean = await moderate_with_deepseek(full_text)
     if is_clean:
-        add_ad_to_db(
+        ad_id = add_ad_to_db(
             title=data['title'],
             description=data['description'],
             price=data['price'],
@@ -1634,15 +1610,23 @@ async def add_photo(message: types.Message, state: FSMContext):
         )
         
         # Отправляем в общий чат, если CHAT_ID задан
+        logging.info(f"CHAT_ID value: {CHAT_ID}")
         if CHAT_ID:
+            logging.info(f"Sending to public chat {CHAT_ID}")
             await send_to_public_chat(
+                ad_id=ad_id,
                 title=data['title'],
                 description=data['description'],
                 price=data['price'],
                 username=message.from_user.username or "NoUsername",
                 district=data.get('district', '📍 Другой район'),
-                photo_id=photo_id
+                photo_id=photo_id,
+                age_group=data.get('age_group'),
+                gender=data.get('gender'),
+                condition=data.get('condition')
             )
+        else:
+            logging.info("CHAT_ID is not set, skipping public chat notification")
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
@@ -1653,7 +1637,8 @@ async def skip_photo(message: types.Message, state: FSMContext):
     full_text = f"{data['title']}\n{data['description']}\nЦена: {data['price']}"
     is_clean = await moderate_with_deepseek(full_text)
     if is_clean:
-        add_ad_to_db(
+        # Добавляем объявление в базу данных
+        ad_id = add_ad_to_db(
             title=data['title'],
             description=data['description'],
             price=data['price'],
@@ -1680,15 +1665,23 @@ async def skip_photo(message: types.Message, state: FSMContext):
         )
         
         # Отправляем в общий чат, если CHAT_ID задан
+        logging.info(f"CHAT_ID value: {CHAT_ID}")
         if CHAT_ID:
+            logging.info(f"Sending to public chat {CHAT_ID}")
             await send_to_public_chat(
+                ad_id=ad_id,
                 title=data['title'],
                 description=data['description'],
                 price=data['price'],
                 username=message.from_user.username or "NoUsername",
                 district=data.get('district', '📍 Другой район'),
-                photo_id=None
+                photo_id=None,
+                age_group=data.get('age_group'),
+                gender=data.get('gender'),
+                condition=data.get('condition')
             )
+        else:
+            logging.info("CHAT_ID is not set, skipping public chat notification")
     else:
         await message.answer("❌ Объявление не прошло модерацию (содержит недопустимый контент).", reply_markup=get_main_keyboard())
     await state.clear()
@@ -1871,6 +1864,57 @@ async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(EditAd.editing_category)
     await callback.answer()
 
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_age_group')
+async def edit_age_group_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    age_groups = ["0–3 мес", "3–12 мес", "1–3 года", "3–7 лет", "7–12 лет"]
+    for age in age_groups:
+        builder.button(text=age, callback_data=f"editage_{age}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите возрастную группу:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_age_group)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_gender')
+async def edit_gender_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    gender_options = ["👧 Девочка", "👦 Мальчик", "👪 Унисекс"]
+    for gender in gender_options:
+        builder.button(text=gender, callback_data=f"editgender_{gender}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите пол:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_gender)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_condition')
+async def edit_condition_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    condition_options = ["🆕 Новое", "✨ Как новое", "🔄 Б/у", "🔧 Требует ремонта"]
+    for cond in condition_options:
+        builder.button(text=cond, callback_data=f"editcond_{cond}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите состояние:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_condition)
+    await callback.answer()
+
+@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_district')
+async def edit_district_start(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    for i, district in enumerate(YAKUTSK_DISTRICTS):
+        builder.button(text=district, callback_data=f"editdist_{i}")
+    builder.button(text="❌ Отмена", callback_data="edit_cancel")
+    builder.adjust(1)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Выберите район:", reply_markup=builder.as_markup())
+    await state.set_state(EditAd.editing_district)
+    await callback.answer()
+
 @dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_photo')
 async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup(reply_markup=None)
@@ -1902,6 +1946,10 @@ async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
     builder.button(text="📄 Описание", callback_data="edit_description")
     builder.button(text="💰 Цена", callback_data="edit_price")
     builder.button(text="🏷️ Категория", callback_data="edit_category")
+    builder.button(text="👶 Возраст", callback_data="edit_age_group")
+    builder.button(text="🚻 Пол", callback_data="edit_gender")
+    builder.button(text="📦 Состояние", callback_data="edit_condition")
+    builder.button(text="📍 Район", callback_data="edit_district")
     builder.button(text="🖼️ Фото", callback_data="edit_photo")
     builder.button(text="❌ Отмена", callback_data="edit_cancel")
     builder.adjust(1)
@@ -1960,150 +2008,76 @@ async def edit_category_finish(callback: types.CallbackQuery, state: FSMContext)
     await state.clear()
     await callback.answer()
 
-@dp.message(EditAd.editing_photo)
-async def edit_photo_finish(message: types.Message, state: FSMContext):
+@dp.callback_query(EditAd.editing_age_group, lambda c: c.data and c.data.startswith("editage_"))
+async def edit_age_group_finish(callback: types.CallbackQuery, state: FSMContext):
+    age_group = callback.data.replace("editage_", "")
     data = await state.get_data()
     ad_id = data['edit_ad_id']
-    photo_id = message.photo[-1].file_id if message.photo else None
-    if photo_id:
-        success = update_ad_photo(ad_id, photo_id)
-        if success:
-            await message.answer("✅ Фото обновлено!", reply_markup=get_main_keyboard())
+    success = update_ad_field(ad_id, 'age_group', age_group)
+    if success:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("✅ Возрастная группа обновлена!", reply_markup=get_main_keyboard())
+    else:
+        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+    await callback.answer()
+
+@dp.callback_query(EditAd.editing_gender, lambda c: c.data and c.data.startswith("editgender_"))
+async def edit_gender_finish(callback: types.CallbackQuery, state: FSMContext):
+    gender = callback.data.replace("editgender_", "")
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'gender', gender)
+    if success:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("✅ Пол обновлён!", reply_markup=get_main_keyboard())
+    else:
+        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+    await callback.answer()
+
+@dp.callback_query(EditAd.editing_condition, lambda c: c.data and c.data.startswith("editcond_"))
+async def edit_condition_finish(callback: types.CallbackQuery, state: FSMContext):
+    condition = callback.data.replace("editcond_", "")
+    data = await state.get_data()
+    ad_id = data['edit_ad_id']
+    success = update_ad_field(ad_id, 'condition', condition)
+    if success:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.answer("✅ Состояние обновлено!", reply_markup=get_main_keyboard())
+    else:
+        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+    await state.clear()
+    await callback.answer()
+
+@dp.callback_query(EditAd.editing_district, lambda c: c.data and c.data.startswith("editdist_"))
+async def edit_district_finish(callback: types.CallbackQuery, state: FSMContext):
+    try:
+        # Извлекаем индекс из callback_data
+        index_str = callback.data.replace("editdist_", "")
+        index = int(index_str)
+        
+        # Получаем район по индексу из списка YAKUTSK_DISTRICTS
+        if 0 <= index < len(YAKUTSK_DISTRICTS):
+            district = YAKUTSK_DISTRICTS[index]
         else:
-            await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
-    else:
-        await message.answer("❌ Фото не распознано. Попробуйте ещё раз или отправьте /skip.")
-        return
-    await state.clear()
-
-@dp.message(EditAd.editing_photo, Command('skip'))
-async def edit_photo_skip(message: types.Message, state: FSMContext):
-    await message.answer("✅ Фото оставлено без изменений.", reply_markup=get_main_keyboard())
-    await state.clear()
-
-# --- Редактирование ---
-# --- Редактирование: выбор поля (должны быть выше общего обработчика) ---
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_title')
-async def edit_title_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое название товара:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_title)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_description')
-async def edit_description_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новое описание:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_description)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_price')
-async def edit_price_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Введите новую цену (только число):", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_price)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_category')
-async def edit_category_start(callback: types.CallbackQuery, state: FSMContext):
-    builder = InlineKeyboardBuilder()
-    for cat in CATEGORIES:
-        builder.button(text=cat, callback_data=f"editcat_{cat}")
-    builder.button(text="❌ Отмена", callback_data="edit_cancel")
-    builder.adjust(1)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Выберите новую категорию:", reply_markup=builder.as_markup())
-    await state.set_state(EditAd.editing_category)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_photo')
-async def edit_photo_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Отправьте новое фото (или /skip, чтобы оставить старое):", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(EditAd.editing_photo)
-    await callback.answer()
-
-@dp.callback_query(EditAd.choosing_field, lambda c: c.data == 'edit_cancel')
-async def edit_cancel(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("❌ Редактирование отменено.", reply_markup=get_main_keyboard())
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data and c.data.startswith("edit_") and c.data.replace("edit_", "").isdigit() and len(c.data.split('_')) == 2)
-async def edit_ad_start(callback: types.CallbackQuery, state: FSMContext):
-    ad_id = int(callback.data.replace("edit_", ""))
-    ad_data = get_ad_by_id(ad_id)
-    if not ad_data:
-        await callback.answer("❌ Объявление не найдено.")
-        return
-    if ad_data['user_id'] != callback.from_user.id:
-        await callback.answer("❌ Это не ваше объявление.")
-        return
-    await state.clear()
-    await state.update_data(edit_ad_id=ad_id, edit_ad_data=ad_data)
-    builder = InlineKeyboardBuilder()
-    builder.button(text="📝 Название", callback_data="edit_title")
-    builder.button(text="📄 Описание", callback_data="edit_description")
-    builder.button(text="💰 Цена", callback_data="edit_price")
-    builder.button(text="🏷️ Категория", callback_data="edit_category")
-    builder.button(text="🖼️ Фото", callback_data="edit_photo")
-    builder.button(text="❌ Отмена", callback_data="edit_cancel")
-    builder.adjust(1)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer("Что вы хотите изменить?", reply_markup=builder.as_markup())
-    await state.set_state(EditAd.choosing_field)
-    await callback.answer()
-
-@dp.message(EditAd.editing_title)
-async def edit_title_finish(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ad_id = data['edit_ad_id']
-    success = update_ad_field(ad_id, 'title', message.text)
-    if success:
-        await message.answer("✅ Название обновлено!", reply_markup=get_main_keyboard())
-    else:
-        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
-    await state.clear()
-
-@dp.message(EditAd.editing_description)
-async def edit_description_finish(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ad_id = data['edit_ad_id']
-    success = update_ad_field(ad_id, 'description', message.text)
-    if success:
-        await message.answer("✅ Описание обновлено!", reply_markup=get_main_keyboard())
-    else:
-        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
-    await state.clear()
-
-@dp.message(EditAd.editing_price)
-async def edit_price_finish(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Пожалуйста, введите цену числом.")
-        return
-    data = await state.get_data()
-    ad_id = data['edit_ad_id']
-    success = update_ad_field(ad_id, 'price', int(message.text))
-    if success:
-        await message.answer("✅ Цена обновлена!", reply_markup=get_main_keyboard())
-    else:
-        await message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
-    await state.clear()
-
-@dp.callback_query(EditAd.editing_category, lambda c: c.data and c.data.startswith("editcat_"))
-async def edit_category_finish(callback: types.CallbackQuery, state: FSMContext):
-    category = callback.data.replace("editcat_", "")
-    data = await state.get_data()
-    ad_id = data['edit_ad_id']
-    success = update_ad_field(ad_id, 'category', category)
-    if success:
+            district = "📍 Другой район"
+            
+        data = await state.get_data()
+        ad_id = data['edit_ad_id']
+        success = update_ad_field(ad_id, 'district', district)
+        if success:
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer("✅ Район обновлён!", reply_markup=get_main_keyboard())
+        else:
+            await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
+        await state.clear()
+        await callback.answer()
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка при выборе района. Попробуйте снова.")
         await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer("✅ Категория обновлена!", reply_markup=get_main_keyboard())
-    else:
-        await callback.message.answer("❌ Ошибка при обновлении.", reply_markup=get_main_keyboard())
-    await state.clear()
-    await callback.answer()
+        await callback.message.answer("Произошла ошибка. Пожалуйста, начните редактирование заново.")
+        await state.clear()
 
 @dp.message(EditAd.editing_photo)
 async def edit_photo_finish(message: types.Message, state: FSMContext):
@@ -2147,6 +2121,8 @@ async def confirm_delete(callback: types.CallbackQuery, state: FSMContext):
     ad_id = int(callback.data.replace("confirm_del_", ""))
     success = delete_ad_by_id(ad_id)
     if success:
+        # Удаляем сообщение из общего чата, если оно есть
+        await delete_public_chat_message(ad_id)
         await callback.message.edit_text("✅ Объявление удалено.")
     else:
         await callback.message.edit_text("❌ Не удалось удалить объявление (возможно, оно уже удалено).")
@@ -2410,7 +2386,7 @@ async def handle_resolve_complaint(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("delete_ad_from_complaint_"))
 async def handle_delete_ad_from_complaint(callback: types.CallbackQuery):
-    """Обработчик кнопки '❌ Удалить объявление'."""
+    """Обработчик кнопки '❌ Удалить объявление'.""" 
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Эта кнопка только для администратора.")
         return
@@ -2439,6 +2415,9 @@ async def handle_delete_ad_from_complaint(callback: types.CallbackQuery):
     # Удаляем объявление (каскадно удалятся и все жалобы на него)
     success = delete_ad_by_id(ad_id)
     if success:
+        # Удаляем сообщение из общего чата, если оно есть
+        await delete_public_chat_message(ad_id)
+        
         # Редактируем сообщение админу
         await callback.message.edit_text(
             f"❌ Объявление #{ad_id} удалено. Жалоба автоматически закрыта.",
@@ -2655,10 +2634,10 @@ async def notify_subscribers(category, title, description, price, username, auth
             logging.error(f"Ошибка отправки уведомления пользователю {user_id}: {e}")
 
 # --- Функция отправки в общий чат ---
-async def send_to_public_chat(title, description, price, username, district, photo_id=None):
-    """Отправляет сообщение о новом объявлении в общий чат."""
+async def send_to_public_chat(ad_id, title, description, price, username, district, photo_id=None, age_group=None, gender=None, condition=None):
+    """Отправляет сообщение о новом объявлении в общий чат и сохраняет message_id."""
     if not CHAT_ID:
-        return
+        return None
     
     text = (
         f"📢 Новое объявление:\n\n"
@@ -2669,6 +2648,17 @@ async def send_to_public_chat(title, description, price, username, district, pho
         f"📍 {district}"
     )
     
+    # Добавляем дополнительную информацию, если она есть
+    additional = []
+    if age_group:
+        additional.append(f"👶 Возраст: {age_group}")
+    if gender:
+        additional.append(f"🚻 Пол: {gender}")
+    if condition:
+        additional.append(f"📦 Состояние: {condition}")
+    if additional:
+        text += "\n" + "\n".join(additional)
+    
     # Получаем username бота
     try:
         bot_info = await bot.get_me()
@@ -2677,7 +2667,7 @@ async def send_to_public_chat(title, description, price, username, district, pho
         logging.error(f"Ошибка получения username бота: {e}")
         bot_username = "your_bot_username"
     
-    # Создаём кнопку-ссылку на бота
+    # Кнопка-ссылка на бота
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🤖 Перейти в бот", url=f"https://t.me/{bot_username}")]
@@ -2686,7 +2676,7 @@ async def send_to_public_chat(title, description, price, username, district, pho
     
     try:
         if photo_id:
-            await bot.send_photo(
+            sent_message = await bot.send_photo(
                 chat_id=CHAT_ID,
                 photo=photo_id,
                 caption=text,
@@ -2694,33 +2684,57 @@ async def send_to_public_chat(title, description, price, username, district, pho
                 reply_markup=keyboard
             )
         else:
-            await bot.send_message(
+            sent_message = await bot.send_message(
                 chat_id=CHAT_ID,
                 text=text,
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
-        logging.info(f"Сообщение о новом объявлении отправлено в чат {CHAT_ID}")
+        
+        # Сохраняем ID сообщения в базу данных
+        if sent_message:
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE ads SET public_chat_message_id = ? WHERE id = ?", (sent_message.message_id, ad_id))
+                conn.commit()
+            logging.info(f"Сообщение о новом объявлении отправлено в чат {CHAT_ID}, message_id={sent_message.message_id}")
+        return sent_message
     except Exception as e:
         logging.error(f"Ошибка отправки сообщения в общий чат: {e}")
+        return None
+
+# --- Функция для удаления сообщения из общего чата ---
+async def delete_public_chat_message(ad_id):
+    """Удаляет сообщение из общего чата по ID объявления."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT public_chat_message_id FROM ads WHERE id = ?", (ad_id,))
+        row = cursor.fetchone()
+        if row and row[0] and CHAT_ID:
+            try:
+                await bot.delete_message(chat_id=CHAT_ID, message_id=row[0])
+                logging.info(f"Сообщение объявления {ad_id} удалено из чата {CHAT_ID}")
+            except Exception as e:
+                logging.error(f"Ошибка удаления сообщения из чата для объявления {ad_id}: {e}")
 
 # --- Запуск бота ---
 async def main():
+    global bot
     proxy_url = os.getenv('PROXY_URL')  # например, socks5://127.0.0.1:1080
     if proxy_url:
         connector = ProxyConnector.from_url(proxy_url)
-        bot_with_proxy = Bot(token=API_TOKEN, connector=connector)
+        bot = Bot(token=API_TOKEN, connector=connector)
         logging.info(f"Using proxy: {proxy_url}")
     else:
-        bot_with_proxy = Bot(token=API_TOKEN)
+        bot = Bot(token=API_TOKEN)
     
-    await bot_with_proxy.delete_webhook()
+    await bot.delete_webhook()
     logging.info("Webhook удалён, запускаем polling...")
     
     # Запускаем фоновую задачу для автоматического удаления
     asyncio.create_task(auto_delete_expired_ads_loop())
     
-    await dp.start_polling(bot_with_proxy)
+    await dp.start_polling(bot)
 
 # --- Фоновая задача для автоматического удаления ---
 async def auto_delete_expired_ads_loop():
